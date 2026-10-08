@@ -4,14 +4,18 @@ Lovable OAuth Helper
 --------------------
 Script interativo para autenticar sua conta no Lovable, obter o access_token
 e o refresh_token via OAuth 2.1 com PKCE e salvar automaticamente em data/tokens.json.
+Suporta execução local ou em VPS remota (com detecção de porta livre e modo manual).
 """
 
 import os
+import sys
 import json
 import time
+import socket
 import base64
 import hashlib
 import secrets
+import argparse
 import threading
 import webbrowser
 import urllib.parse
@@ -28,9 +32,6 @@ CLIENT_FILE = os.path.join(DATA_DIR, "oauth_client.json")
 REGISTRATION_ENDPOINT = "https://lovable.dev/oauth/register"
 AUTHORIZE_ENDPOINT = "https://lovable.dev/oauth/authorize"
 TOKEN_ENDPOINT = "https://lovable.dev/oauth/token"
-
-CALLBACK_PORT = 8080
-REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
 SCOPES = "offline projects:read projects:write workspaces:read workspaces:write"
 
 auth_code = None
@@ -38,9 +39,13 @@ auth_error = None
 server_done = threading.Event()
 
 
+class ReusableHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
+
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Suprime logs normais do HTTP server
+        # Suprime logs de acesso HTTP
         pass
 
     def do_GET(self):
@@ -78,22 +83,38 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
 
-def get_or_create_client():
-    """Gera ou recupera as credenciais de cliente OAuth dinâmico no Lovable."""
+def find_available_port(preferred_port=8080, max_attempts=50) -> int:
+    """Encontra uma porta TCP disponível, testando a preferencial e alternativas."""
+    ports_to_try = [preferred_port] + [p for p in range(preferred_port + 1, preferred_port + max_attempts) if p != preferred_port]
+    for p in ports_to_try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("0.0.0.0", p))
+            s.close()
+            return p
+        except OSError:
+            s.close()
+            continue
+    raise RuntimeError(f"Não foi possível encontrar nenhuma porta TCP livre entre {preferred_port} e {preferred_port + max_attempts}")
+
+
+def get_or_create_client(redirect_uri: str):
+    """Gera ou recupera as credenciais de cliente OAuth dinâmico no Lovable para o redirect_uri especificado."""
     os.makedirs(DATA_DIR, exist_ok=True)
     if os.path.exists(CLIENT_FILE):
         try:
             with open(CLIENT_FILE, "r") as f:
                 data = json.load(f)
-                if data.get("client_id") and data.get("client_secret"):
+                if data.get("client_id") and data.get("client_secret") and data.get("redirect_uri") == redirect_uri:
                     return data["client_id"], data["client_secret"]
         except Exception:
             pass
 
-    print("🔧 Registrando cliente OAuth temporário no Lovable...")
+    print(f"🔧 Registrando cliente OAuth temporário no Lovable para '{redirect_uri}'...")
     payload = json.dumps({
         "client_name": "Lovable MCP Proxy Bridge",
-        "redirect_uris": [REDIRECT_URI]
+        "redirect_uris": [redirect_uri]
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -101,17 +122,17 @@ def get_or_create_client():
         data=payload,
         headers={"Content-Type": "application/json", "User-Agent": "Lovable-MCP-Proxy"}
     )
-    with urllib.request.urlopen(req) as response:
+    with urllib.request.urlopen(req, timeout=15) as response:
         client_data = json.load(response)
 
     client_id = client_data["client_id"]
     client_secret = client_data["client_secret"]
 
-    with open(CLIENT_FILE, "w") as f:
+    with open(CLIENT_FILE, "w", encoding="utf-8") as f:
         json.dump({
             "client_id": client_id,
             "client_secret": client_secret,
-            "redirect_uri": REDIRECT_URI
+            "redirect_uri": redirect_uri
         }, f, indent=2)
 
     return client_id, client_secret
@@ -126,12 +147,12 @@ def generate_pkce():
     return code_verifier, code_challenge, state
 
 
-def exchange_code_for_tokens(client_id, client_secret, code, code_verifier):
+def exchange_code_for_tokens(client_id, client_secret, code, code_verifier, redirect_uri):
     """Troca o authorization_code pelo access_token e refresh_token."""
     data = urllib.parse.urlencode({
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "code_verifier": code_verifier,
         "client_id": client_id,
         "client_secret": client_secret
@@ -151,27 +172,93 @@ def exchange_code_for_tokens(client_id, client_secret, code, code_verifier):
         }
     )
 
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req, timeout=15) as resp:
         return json.load(resp)
 
 
+def manual_input_listener():
+    """Permite que o usuário cole a URL redirecionada ou o código diretamente no terminal."""
+    global auth_code, auth_error
+    try:
+        while not server_done.is_set():
+            prompt_text = "\n📋 Se estiver em VPS remota: após autorizar no navegador, cole a URL redirecionada (ou o code) aqui:\n> "
+            sys.stdout.write(prompt_text)
+            sys.stdout.flush()
+            user_input = sys.stdin.readline()
+            if not user_input:
+                break
+            val = user_input.strip()
+            if val and not server_done.is_set():
+                if "code=" in val:
+                    # O usuário colou a URL inteira: http://localhost:8080/callback?code=XXXX&state=YYYY
+                    parsed = urllib.parse.urlparse(val)
+                    params = urllib.parse.parse_qs(parsed.query)
+                    if "code" in params:
+                        auth_code = params["code"][0]
+                        server_done.set()
+                        break
+                    elif "error" in params:
+                        auth_error = params.get("error_description", params["error"])[0]
+                        server_done.set()
+                        break
+                elif len(val) >= 10:
+                    # O usuário colou apenas o code
+                    auth_code = val
+                    server_done.set()
+                    break
+    except Exception:
+        pass
+
+
 def main():
+    parser = argparse.ArgumentParser(description="Lovable OAuth 2.1 CLI Helper")
+    parser.add_argument("--port", "-p", type=int, default=None, help="Porta local para o callback (padrão: auto-detectar a partir de 8080)")
+    parser.add_argument("--no-browser", action="store_true", help="Não tenta abrir navegador automaticamente")
+    args = parser.parse_args()
+
     print("==================================================")
     print("🔑 Assistente de Autenticação OAuth 2.1 - Lovable")
     print("==================================================")
 
-    client_id, client_secret = get_or_create_client()
+    # 1. Determina a porta disponível
+    preferred = args.port or int(os.getenv("AUTH_CALLBACK_PORT", "8080"))
+    try:
+        port = find_available_port(preferred)
+        if port != preferred:
+            print(f"ℹ️  A porta {preferred} já está em uso por outro serviço na sua máquina.")
+            print(f"👉 Usando a porta livre detectada: {port}")
+        else:
+            print(f"ℹ️  Usando a porta local: {port}")
+    except Exception as e:
+        print(f"❌ Erro ao obter porta: {e}")
+        return
+
+    redirect_uri = f"http://localhost:{port}/callback"
+
+    # 2. Registra o cliente OAuth
+    try:
+        client_id, client_secret = get_or_create_client(redirect_uri)
+    except Exception as e:
+        print(f"❌ Falha ao registrar cliente OAuth dinâmico no Lovable: {e}")
+        return
+
     code_verifier, code_challenge, state = generate_pkce()
 
-    # Prepara o servidor local de callback
-    server = HTTPServer(("0.0.0.0", CALLBACK_PORT), OAuthCallbackHandler)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
+    # 3. Inicia servidor HTTP local para capturar o callback automaticamente
+    server = None
+    try:
+        server = ReusableHTTPServer(("0.0.0.0", port), OAuthCallbackHandler)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+    except Exception as e:
+        print(f"⚠️ Não foi possível iniciar servidor HTTP local na porta {port}: {e}")
+        print("Modo de colagem manual ativo.")
 
+    # 4. Gera URL de autorização
     params = {
         "client_id": client_id,
         "response_type": "code",
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "scope": SCOPES,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
@@ -179,38 +266,54 @@ def main():
     }
     authorize_url = f"{AUTHORIZE_ENDPOINT}?{urllib.parse.urlencode(params)}"
 
-    print("\n👉 Abrindo navegador para autorização do Lovable...")
-    print(f"URL de Autorização:\n{authorize_url}\n")
-    try:
-        webbrowser.open(authorize_url)
-    except Exception:
-        pass
+    print("\n--------------------------------------------------")
+    print("🌐 URL DE AUTORIZAÇÃO:")
+    print("--------------------------------------------------")
+    print(f"\n{authorize_url}\n")
+    print("--------------------------------------------------")
 
-    print(f"Aguardando autorização no navegador (escutando em {REDIRECT_URI})...")
-    print("(Pressione Ctrl+C para cancelar)\n")
+    if not args.no_browser:
+        try:
+            webbrowser.open(authorize_url)
+            print("👉 Tentando abrir o navegador automaticamente...")
+        except Exception:
+            pass
+
+    print("\nInstruções:")
+    print("1. Abra o link acima no seu navegador (se não abriu sozinho).")
+    print("2. Faça login no Lovable e clique em Autorizar.")
+    print("3. Se estiver na VPS: após autorizar, o navegador tentará abrir 'localhost'.")
+    print("   Copie a URL da barra de endereços do navegador e cole abaixo!")
+    print("(Pressione Ctrl+C a qualquer momento para sair)")
+
+    # Inicia thread de escuta para colagem manual
+    input_thread = threading.Thread(target=manual_input_listener, daemon=True)
+    input_thread.start()
 
     try:
-        # Aguarda até o callback ser chamado
         while not server_done.is_set():
             time.sleep(0.5)
     except KeyboardInterrupt:
-        print("\nOperação cancelada pelo usuário.")
-        server.shutdown()
+        print("\n\nOperação cancelada pelo usuário.")
+        if server:
+            server.shutdown()
         return
 
-    server.shutdown()
+    if server:
+        server.shutdown()
 
     if auth_error:
-        print(f"❌ Erro durante autorização: {auth_error}")
+        print(f"\n❌ Erro durante autorização: {auth_error}")
         return
 
     if not auth_code:
-        print("❌ Nenhum código de autorização foi capturado.")
+        print("\n❌ Nenhum código de autorização foi capturado.")
         return
 
-    print("🔄 Código recebido! Solicitando access_token e refresh_token...")
+    print("\n🔄 Código recebido com sucesso!")
+    print("📡 Solicitando access_token e refresh_token ao Lovable...")
     try:
-        tokens = exchange_code_for_tokens(client_id, client_secret, auth_code, code_verifier)
+        tokens = exchange_code_for_tokens(client_id, client_secret, auth_code, code_verifier, redirect_uri)
     except Exception as e:
         print(f"❌ Erro ao trocar código por tokens: {e}")
         return
@@ -234,13 +337,13 @@ def main():
     with open(TOKENS_FILE, "w", encoding="utf-8") as f:
         json.dump(tokens_payload, f, indent=2)
 
-    print(f"✅ Tokens salvos com sucesso em: {TOKENS_FILE}")
+    print(f"\n✅ Tokens salvos com sucesso em: {TOKENS_FILE}")
     print(f"   • Access Token:  {access_token[:15]}...{access_token[-10:]}")
     if refresh_token:
         print(f"   • Refresh Token: {refresh_token[:15]}...{refresh_token[-10:]}")
     print(f"   • Expira em:     {expires_in} segundos (~{expires_in//3600} horas)")
 
-    # Tenta acionar o reconnect do container local se estiver ativo
+    # Notifica o proxy local se estiver ativo
     try:
         req_reconnect = urllib.request.Request(
             "http://localhost:8000/reconnect",
