@@ -1,0 +1,20 @@
+# Variáveis de ambiente e segredos
+.env
+data/tokens.json
+data/*.json
+!data/tokens.json.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Logs e IDEs
+*.log
+.vscode/
+.idea/

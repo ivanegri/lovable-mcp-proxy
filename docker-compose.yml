@@ -1,0 +1,20 @@
+services:
+  lovable-mcp-proxy:
+    build: .
+    container_name: lovable-mcp-proxy
+    restart: unless-stopped
+    ports:
+      # Permite amarrar ao IP específico da VPN (ex: 10.8.0.5:8000:8000) via .env
+      - "${BIND_IP:-0.0.0.0}:${PORT:-8000}:8000"
+    environment:
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-minha_chave_secreta_123}
+      - TOKEN_FILE_PATH=/app/data/tokens.json
+      - LOVABLE_SSE_URL=${LOVABLE_SSE_URL:-https://mcp.lovable.dev/sse}
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
