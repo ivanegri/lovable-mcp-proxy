@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException, Request, Header, status
 from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client, create_mcp_http_client
 from mcp.client.sse import sse_client
 
 # Configuração de Logs
@@ -23,7 +24,14 @@ logger = logging.getLogger("lovable-mcp-proxy")
 TOKEN_FILE = os.getenv("TOKEN_FILE_PATH", "/app/data/tokens.json")
 CLIENT_FILE = os.getenv("CLIENT_FILE_PATH", "/app/data/oauth_client.json")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "minha_chave_secreta_123")
-LOVABLE_SSE_URL = os.getenv("LOVABLE_SSE_URL", "https://mcp.lovable.dev/sse")
+LOVABLE_RAW_URL = os.getenv("LOVABLE_MCP_URL") or os.getenv("LOVABLE_SSE_URL") or "https://mcp.lovable.dev"
+
+# Remove '/sse' caso tenha sido herdado de configuração antiga
+if LOVABLE_RAW_URL.endswith("/sse"):
+    LOVABLE_MCP_URL = LOVABLE_RAW_URL[:-4]
+else:
+    LOVABLE_MCP_URL = LOVABLE_RAW_URL
+
 TOKEN_ENDPOINT = os.getenv("TOKEN_ENDPOINT", "https://lovable.dev/oauth/token")
 
 mcp_session: Optional[ClientSession] = None
@@ -120,7 +128,7 @@ def verify_internal_auth(x_api_key: Optional[str]):
 
 
 async def connect_mcp(retry_on_auth_failure: bool = True):
-    """Inicializa ou reinicializa a conexão SSE e a sessão MCP com o Lovable."""
+    """Inicializa ou reinicializa a conexão MCP com o Lovable usando Streamable HTTP."""
     global mcp_session, exit_stack
     token = load_token()
     headers = {
@@ -137,9 +145,11 @@ async def connect_mcp(retry_on_auth_failure: bool = True):
 
     stack = AsyncExitStack()
     try:
-        # sse_client retorna (read_stream, write_stream)
+        logger.info(f"Conectando ao Lovable MCP em: {LOVABLE_MCP_URL}")
+        http_client = create_mcp_http_client(headers=headers)
+        
         streams = await stack.enter_async_context(
-            sse_client(url=LOVABLE_SSE_URL, headers=headers)
+            streamable_http_client(url=LOVABLE_MCP_URL, http_client=http_client)
         )
         read_stream, write_stream = streams
 
@@ -157,9 +167,10 @@ async def connect_mcp(retry_on_auth_failure: bool = True):
         mcp_session = None
         exit_stack = None
 
-        # Se falhou por 401 e temos refresh_token, tenta renovar e reconectar uma vez
-        if retry_on_auth_failure and ("401" in str(e) or "Unauthorized" in str(e)):
-            logger.warning("Falha de autenticação (401). Tentando renovar com refresh_token...")
+        err_msg = str(e)
+        # Se falhou por não autenticado (401) e temos refresh_token, tenta renovar e reconectar uma vez
+        if retry_on_auth_failure and any(term in err_msg for term in ["401", "Unauthorized", "Not authenticated"]):
+            logger.warning("Falha de autenticação no Lovable. Tentando renovar com refresh_token...")
             if try_refresh_token():
                 return await connect_mcp(retry_on_auth_failure=False)
 
@@ -195,13 +206,29 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Lovable MCP Proxy Bridge",
-    description="Proxy REST seguro para integração com o servidor Lovable MCP via SSE",
-    version="1.1.0",
+    description="Proxy REST seguro para integração com o servidor Lovable MCP",
+    version="1.2.0",
     lifespan=lifespan
 )
 
 
+@app.get("/")
+async def root():
+    """Endpoint raiz para verificação rápida de status do proxy."""
+    return {
+        "service": "Lovable MCP Proxy Bridge",
+        "status": "online",
+        "mcp_connected": mcp_session is not None,
+        "endpoints": {
+            "health": "/health",
+            "tools": "/tools",
+            "call_tool": "/tools/{tool_name}"
+        }
+    }
+
+
 @app.get("/health")
+@app.get("/health/")
 async def health_check():
     """Verifica a integridade do proxy e a conexão com o Lovable MCP."""
     is_connected = mcp_session is not None
@@ -223,6 +250,7 @@ async def health_check():
 
 
 @app.post("/reconnect")
+@app.post("/reconnect/")
 async def reconnect(x_api_key: Optional[str] = Header(None, alias="x-api-key")):
     """Força reconexão com o Lovable MCP (útil após atualizar o tokens.json)."""
     verify_internal_auth(x_api_key)
@@ -237,6 +265,7 @@ async def reconnect(x_api_key: Optional[str] = Header(None, alias="x-api-key")):
 
 
 @app.get("/tools")
+@app.get("/tools/")
 async def list_tools(x_api_key: Optional[str] = Header(None, alias="x-api-key")):
     """Lista todas as ferramentas disponíveis no servidor MCP do Lovable."""
     verify_internal_auth(x_api_key)
@@ -250,6 +279,7 @@ async def list_tools(x_api_key: Optional[str] = Header(None, alias="x-api-key"))
 
 
 @app.post("/tools/{tool_name}")
+@app.post("/tools/{tool_name}/")
 async def call_tool(
     tool_name: str,
     request: Request,

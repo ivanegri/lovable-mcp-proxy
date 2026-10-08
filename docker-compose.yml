@@ -9,7 +9,7 @@ services:
     environment:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-minha_chave_secreta_123}
       - TOKEN_FILE_PATH=/app/data/tokens.json
-      - LOVABLE_SSE_URL=${LOVABLE_SSE_URL:-https://mcp.lovable.dev/sse}
+      - LOVABLE_MCP_URL=${LOVABLE_MCP_URL:-https://mcp.lovable.dev}
     volumes:
       - ./data:/app/data
     healthcheck:
