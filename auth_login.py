@@ -33,6 +33,9 @@ REGISTRATION_ENDPOINT = "https://lovable.dev/oauth/register"
 AUTHORIZE_ENDPOINT = "https://lovable.dev/oauth/authorize"
 TOKEN_ENDPOINT = "https://lovable.dev/oauth/token"
 SCOPES = "offline projects:read projects:write workspaces:read workspaces:write"
+# IMPORTANTE: o registro dinâmico do Lovable usa por padrão apenas ["authorization_code"].
+# Sem "refresh_token" aqui, o servidor NUNCA emite refresh_token (mesmo com escopo 'offline').
+GRANT_TYPES = ["authorization_code", "refresh_token"]
 
 auth_code = None
 auth_error = None
@@ -106,15 +109,26 @@ def get_or_create_client(redirect_uri: str):
         try:
             with open(CLIENT_FILE, "r") as f:
                 data = json.load(f)
-                if data.get("client_id") and data.get("client_secret") and data.get("redirect_uri") == redirect_uri:
+                if (
+                    data.get("client_id")
+                    and data.get("client_secret")
+                    and data.get("redirect_uri") == redirect_uri
+                    and "refresh_token" in (data.get("grant_types") or [])
+                ):
                     return data["client_id"], data["client_secret"]
+                if data.get("client_id") and "refresh_token" not in (data.get("grant_types") or []):
+                    print("ℹ️  Cliente OAuth salvo não permite refresh_token. Registrando um novo...")
         except Exception:
             pass
 
-    print(f"🔧 Registrando cliente OAuth temporário no Lovable para '{redirect_uri}'...")
+    print(f"🔧 Registrando cliente OAuth no Lovable para '{redirect_uri}'...")
     payload = json.dumps({
         "client_name": "Lovable MCP Proxy Bridge",
-        "redirect_uris": [redirect_uri]
+        "redirect_uris": [redirect_uri],
+        "grant_types": GRANT_TYPES,
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "client_secret_basic",
+        "scope": SCOPES
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -127,12 +141,16 @@ def get_or_create_client(redirect_uri: str):
 
     client_id = client_data["client_id"]
     client_secret = client_data["client_secret"]
+    granted_grants = client_data.get("grant_types") or []
+    if "refresh_token" not in granted_grants:
+        print(f"⚠️  O Lovable registrou o cliente sem o grant 'refresh_token' (grant_types={granted_grants}).")
 
     with open(CLIENT_FILE, "w", encoding="utf-8") as f:
         json.dump({
             "client_id": client_id,
             "client_secret": client_secret,
-            "redirect_uri": redirect_uri
+            "redirect_uri": redirect_uri,
+            "grant_types": granted_grants
         }, f, indent=2)
 
     return client_id, client_secret
@@ -341,6 +359,10 @@ def main():
     print(f"   • Access Token:  {access_token[:15]}...{access_token[-10:]}")
     if refresh_token:
         print(f"   • Refresh Token: {refresh_token[:15]}...{refresh_token[-10:]}")
+    else:
+        print("   ⚠️ NENHUM refresh_token recebido! A renovação automática NÃO funcionará.")
+        print(f"      Escopo concedido: {tokens.get('scope')!r} (precisa conter 'offline').")
+        print(f"      Apague {CLIENT_FILE} e rode o script novamente.")
     print(f"   • Expira em:     {expires_in} segundos (~{expires_in//3600} horas)")
 
     # Notifica o proxy local se estiver ativo
