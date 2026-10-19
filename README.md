@@ -1,297 +1,171 @@
-# 🚀 Lovable MCP Proxy Bridge
+# 🚀 MCP Multi-Tenant Bridge Hub (Lovable & Uscreen)
 
-Proxy REST conteinerizado (Docker + FastAPI) para conectar seu framework (N8N, Flowise, agentes de IA ou aplicações customizadas) ao **servidor MCP oficial do Lovable** (`https://mcp.lovable.dev/sse`) de forma segura, isolada e com suporte a rede privada/VPN.
+Gateway REST conteinerizado (Docker + FastAPI) para conectar múltiplos agentes de IA (N8N, Flowise, LangChain, Cursor, Claude ou scripts customizados) aos servidores MCP oficiais do **Lovable** (`https://mcp.lovable.dev`) e do **Uscreen** (`https://app.uscreen.tv/mcp`) de forma **multi-tenant**, segura e com **isolamento total** entre serviços e contas.
+
+---
+
+## 🌟 Principais Recursos
+
+- **Multi-Serviço & Multi-Tenant**: Conecte várias contas do Lovable e várias contas do Uscreen no mesmo contêiner Docker.
+- **Isolamento Total**: Se a conexão do Lovable expirar ou falhar, o Uscreen continua funcionando sem qualquer dependência (e vice-versa).
+- **Painel Visual Web (1-Click OAuth)**: Acesse `http://<ip-ou-host>:8000/` no navegador para gerenciar tenants e conectar contas com apenas um clique!
+- **Auto-Refresh de Tokens**: Renovação proativa em segundo plano antes da expiração usando `refresh_token` OAuth 2.1 com PKCE (Zero Downtime).
+- **Chaves de API Isoladas por Tenant**: Cada tenant possui sua própria `x-api-key`, impedindo que um agente acesse dados de outro tenant.
+- **Compatibilidade Retroativa**: Suporta as rotas legadas `/tools` além das rotas tipadas `/{service}/{tenant}/tools`.
 
 ---
 
 ## 📐 1. Arquitetura da Solução
 
 ```text
-┌─────────────────────────┐
-│ Seu Framework / Agente  │ (ex: N8N, Flowise, Python, cURL)
-│ (Na mesma VPN / Rede)   │
-└───────────┬─────────────┘
-            │  HTTP POST / GET + Header "x-api-key: <INTERNAL_API_KEY>"
-            ▼
-┌─────────────────────────┐
-│   Rede VPN Privada      │ (Tailscale / WireGuard / OpenVPN)
-│   Host IP (ex: 10.8.0.5)│
-└───────────┬─────────────┘
-            │  Porta 8000 (atrelada ao IP da VPN)
-            ▼
-┌──────────────────────────────────────────────────────────┐
-│  Host Docker (lovable-mcp-proxy)                         │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │ FastAPI Proxy                                      │  │
-│  │ 1. Valida x-api-key interna                        │  │
-│  │ 2. Lê access_token persistido em volume            │  │
-│  │ 3. Gerencia sessão MCP persistente                 │  │
-│  └────────────────────────┬───────────────────────────┘  │
-│                           │                              │
-│  ┌────────────────────────┴───────────┐                  │
-│  │ Volume Persistente (./data)        │                  │
-│  │ └── tokens.json                    │                  │
-│  └────────────────────────────────────┘                  │
-└───────────────────────────┬──────────────────────────────┘
-                            │  HTTPS + SSE (Server-Sent Events)
-                            │  Authorization: Bearer <Lovable OAuth Token>
-                            ▼
-           ┌───────────────────────────────────┐
-           │    Lovable MCP Server (Cloud)     │
-           │    https://mcp.lovable.dev/sse    │
-           └───────────────────────────────────┘
+┌─────────────────────────────────┐       ┌─────────────────────────────────┐
+│     Agente A (Lovable)          │       │      Agente B (Uscreen)         │
+│  Header: x-api-key: sk_tenant_1 │       │  Header: x-api-key: sk_tenant_2 │
+└────────────────┬────────────────┘       └────────────────┬────────────────┘
+                 │ POST /lovable/tools/...                 │ POST /uscreen/tools/...
+                 ▼                                         ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│                    MCP MULTI-TENANT BRIDGE (Docker)                       │
+│                                                                           │
+│   Web Dashboard em http://localhost:8000/ (Autenticação 1-Clique)         │
+│                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │ FastAPI Router & Dispatcher                                         │  │
+│  │ 1. Valida x-api-key (Isolamento estrito entre tenants)              │  │
+│  │ 2. Pool de Sessões MCP Independentes (Async Locks por Tenant)       │  │
+│  │ 3. Background Loop de Auto-Renovação Proativa                       │  │
+│  └──────────────────┬───────────────────────────────┬──────────────────┘  │
+│                     │                               │                     │
+│    Sessão MCP Lovable (Tenant 1)     Sessão MCP Uscreen (Tenant 2)        │
+└─────────────┬───────────────────────────────────────┬─────────────────────┘
+              │ Bearer OAuth + PKCE                   │ Bearer OAuth + PKCE
+              ▼                                       ▼
+ ┌──────────────────────────┐           ┌──────────────────────────┐
+ │    Lovable MCP Server    │           │    Uscreen MCP Server    │
+ │  https://mcp.lovable.dev │           │  https://app.uscreen.tv  │
+ └──────────────────────────┘           └──────────────────────────┘
 ```
 
 ---
 
-## 📁 2. Estrutura de Arquivos
-
-```text
-MCP_Lovable/
-├── auth_login.py         # Assistente CLI para login OAuth 2.1 e captura automática do access/refresh token
-├── proxy.py              # Aplicação FastAPI com conexão SSE MCP e auto-refresh de tokens
-├── Dockerfile            # Imagem Docker baseada em python:3.11-slim
-├── docker-compose.yml    # Orquestração do contêiner e mapeamento de volumes/portas
-├── requirements.txt      # Dependências (fastapi, uvicorn, httpx, mcp)
-├── .env.example          # Modelo de variáveis de ambiente
-├── .env                  # Configurações ativas locais (chave interna, IP, porta)
-├── .gitignore            # Protege tokens e arquivos sensíveis
-├── test_endpoints.sh     # Script bash para validação rápida dos endpoints
-└── data/
-    ├── oauth_client.json # Credenciais do cliente OAuth local registradas dinamicamente
-    ├── tokens.json.example
-    └── tokens.json       # access_token e refresh_token (com rotação e renovação automática)
-```
-
----
-
-## ⚡ 3. Passo a Passo de Instalação e Execução
+## ⚡ 2. Início Rápido
 
 ### Passo 1: Configurar Variáveis de Ambiente
-Copie o modelo de ambiente se ainda não tiver feito:
+Copie o arquivo de exemplo caso ainda não tenha feito:
 ```bash
 cp .env.example .env
 ```
-Edite o arquivo `.env`:
-- `INTERNAL_API_KEY`: Defina uma chave secreta e forte para proteger o proxy de acessos não autorizados na VPN.
-- `BIND_IP`: Se desejar que o proxy só escute no IP da VPN da máquina host (ex: `10.8.0.5` ou IP Tailscale `100.x.x.x`), preencha com o respectivo IP. Use `0.0.0.0` para escutar em todas as interfaces.
-- `PORT`: Porta de serviço (padrão: `8000`).
+Edite `.env`:
+- `INTERNAL_API_KEY`: Sua chave mestra administrativa.
+- `PORT`: Porta do serviço (padrão: `8000`).
+- `BIND_IP`: `0.0.0.0` para todas as interfaces ou o IP da sua VPN (Tailscale/WireGuard).
 
-### Passo 2: Obter o Token e Refresh Token do Lovable
-
-Execute o assistente automático:
-```bash
-./auth_login.py
-```
-O script fará todo o processo:
-1. Registra o cliente OAuth localmente no Lovable com suporte ao escopo `offline`.
-2. Abre a tela oficial de login e autorização do Lovable no seu navegador.
-3. Captura o código de autorização em `http://localhost:8080/callback`.
-4. Troca o código pelo `access_token` e **`refresh_token`**.
-5. Salva tudo automaticamente em `data/tokens.json` e notifica o contêiner Docker para conectar imediatamente!
-
-> **✨ Renovação Automática (Zero Downtime)**: Com o `refresh_token` salvo, o próprio `proxy.py` renovará os tokens em segundo plano antes que expirem, sem necessidade de nova intervenção humana!
-
-### Passo 3: Iniciar o Contêiner com Docker Compose
+### Passo 2: Iniciar com Docker Compose
 ```bash
 docker compose up -d --build
 ```
 
-### Passo 4: Verificar a Conexão
-Consulte os logs do contêiner para confirmar a conexão com o Lovable:
-```bash
-docker compose logs -f lovable-mcp-proxy
-```
-Você verá:
+O contêiner subirá com o servidor e o painel web ativos.
+
+---
+
+## 🌐 3. Autenticação Fácil via Painel Web (Recomendado)
+
+Abra no seu navegador:
 ```text
-✅ Conectado ao Lovable MCP com sucesso!
-INFO: Uvicorn running on http://0.0.0.0:8000
+http://localhost:8000/
+(ou http://IP_DO_SERVIDOR:8000/)
+```
+
+1. **Visualizar Tenants**: Você verá o tenant `default` já criado e suas conexões com Lovable e Uscreen.
+2. **Conectar Uscreen ou Lovable**:
+   - Clique em **"🚀 Conectar Uscreen"** ou **"🚀 Conectar Lovable"**.
+   - Você será redirecionado para a tela oficial de login e consentimento da plataforma.
+   - Após autorizar, você voltará ao painel com a conexão **Conectada e Ativa**!
+3. **Novo Tenant**:
+   - Clique em **"+ Novo Tenant"** para adicionar uma nova empresa ou loja.
+   - Cada tenant recebe uma `x-api-key` própria.
+4. **Setup do Agente**:
+   - Clique em **"🤖 Setup Agente"** em qualquer serviço para copiar a URL exata e o comando cURL pronto para uso.
+
+---
+
+## 💻 4. Autenticação via Linha de Comando (CLI Alternativo)
+
+Se preferir autenticar via terminal:
+
+```bash
+# Conectar Lovable para o tenant default:
+./auth_login.py --service lovable --tenant default
+
+# Conectar Uscreen para o tenant default:
+./auth_login.py --service uscreen --tenant default
+
+# Conectar Uscreen para um tenant específico:
+./auth_login.py --service uscreen --tenant loja_filial_sp
 ```
 
 ---
 
-## 🧪 4. Testando os Endpoints
+## 🤖 5. Como Conectar seus Agentes de IA
 
-Você pode executar o script utilitário incluído:
-```bash
-./test_endpoints.sh
-```
+### Roteamento por Caminho (Recomendado)
 
-Ou usar `curl` diretamente:
+Cada agente pode se comunicar diretamente com seu serviço e tenant correspondente:
 
-### 1. Healthcheck (Sem autenticação requerida)
-```bash
-curl -X GET http://localhost:8000/health
-```
-Resposta esperada:
-```json
-{
-  "status": "healthy",
-  "mcp_connected": true,
-  "token_file_present": true
-}
-```
+#### Uscreen:
+- **Listar Ferramentas:**
+  ```bash
+  curl -X GET "http://localhost:8000/uscreen/default/tools" \
+    -H "x-api-key: SUA_CHAVE_DO_TENANT"
+  ```
+- **Executar Ferramenta:**
+  ```bash
+  curl -X POST "http://localhost:8000/uscreen/default/tools/NOME_DA_TOOL" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: SUA_CHAVE_DO_TENANT" \
+    -d '{"parametro": "valor"}'
+  ```
 
-### 2. Listar Ferramentas do Lovable MCP
-```bash
-curl -X GET http://localhost:8000/tools \
-  -H "x-api-key: minha_chave_secreta_123"
-```
+#### Lovable:
+- **Listar Ferramentas:**
+  ```bash
+  curl -X GET "http://localhost:8000/lovable/default/tools" \
+    -H "x-api-key: SUA_CHAVE_DO_TENANT"
+  ```
+- **Executar Ferramenta:**
+  ```bash
+  curl -X POST "http://localhost:8000/lovable/default/tools/list_workspaces" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: SUA_CHAVE_DO_TENANT" \
+    -d '{}'
+  ```
 
-### 3. Executar uma Ferramenta (Ex: `list_workspaces`)
-```bash
-curl -X POST http://localhost:8000/tools/list_workspaces \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: minha_chave_secreta_123" \
-  -d '{}'
-```
+---
 
-### 4. Forçar Reconexão (Se atualizar o token em `tokens.json`)
-```bash
-curl -X POST http://localhost:8000/reconnect \
-  -H "x-api-key: minha_chave_secreta_123"
+## 📁 6. Estrutura de Arquivos
+
+```text
+MCP_Lovable/
+├── proxy.py              # Aplicação principal FastAPI com roteamento e isolamento
+├── providers.py          # Especificação OAuth 2.1 (PKCE) de Lovable e Uscreen
+├── session_manager.py    # Pool de sessões MCP persistentes e auto-refresh
+├── storage.py            # Persistência de tenants e tokens em /data
+├── dashboard.py          # Interface visual web moderna para autenticação
+├── auth_login.py         # Utilitário CLI para autenticação via terminal
+├── Dockerfile            # Imagem de produção otimizada
+├── docker-compose.yml    # Orquestração do serviço
+├── test_endpoints.sh     # Script para testes automatizados
+└── data/                 # Volume persistente
+    ├── tenants.json      # Metadados e chaves dos tenants
+    ├── clients/          # Cache de clientes OAuth dinâmicos
+    └── tokens/           # Tokens isolados ({service}_{tenant}.json)
 ```
 
 ---
 
-## 🛠️ 5. Catálogo de Ferramentas Disponíveis no Lovable MCP
+## 🛡️ 7. Segurança e Isolamento
 
-Todas as chamadas são feitas via `POST /tools/{tool_name}` enviando os argumentos em formato JSON no body:
-
-### 🔹 1. Inspeção e Compreensão de Código
-* **`list_files`**: Lista a árvore de arquivos e pastas do projeto.
-  ```json
-  {
-    "project_id": "seu-project-id"
-  }
-  ```
-* **`read_file`**: Lê o conteúdo bruto de um arquivo.
-  ```json
-  {
-    "project_id": "seu-project-id",
-    "path": "src/App.tsx"
-  }
-  ```
-* **`get_diff`**: Obtém o diff unificado de uma alteração ou mensagem.
-  ```json
-  {
-    "project_id": "seu-project-id",
-    "message_id": "message-id-aqui"
-  }
-  ```
-* **`list_edits`**: Lista o histórico de edições do projeto.
-  ```json
-  {
-    "project_id": "seu-project-id"
-  }
-  ```
-
-### 🔹 2. Gestão de Projetos e Workspaces
-* **`list_workspaces`**: Lista todos os workspaces da sua conta.
-  ```json
-  {}
-  ```
-* **`get_workspace`**: Retorna informações detalhadas do workspace (plano, créditos, membros).
-  ```json
-  {
-    "workspace_id": "workspace-id-aqui"
-  }
-  ```
-* **`list_projects`**: Pesquisa e lista projetos no workspace.
-  ```json
-  {
-    "workspace_id": "workspace-id-aqui",
-    "query": "meu app"
-  }
-  ```
-* **`get_project`**: Detalhes completos do projeto (URLs de editor e preview, screenshot).
-  ```json
-  {
-    "project_id": "seu-project-id"
-  }
-  ```
-* **`create_project`**: Cria um novo projeto a partir de um prompt inicial.
-  ```json
-  {
-    "workspace_id": "workspace-id-aqui",
-    "prompt": "Crie um dashboard moderno para controle de finanças pessoais com Next.js, Tailwind e Shadcn UI"
-  }
-  ```
-* **`deploy_project`**: Publica o projeto no domínio de produção Lovable.
-  ```json
-  {
-    "project_id": "seu-project-id"
-  }
-  ```
-* **`remix_project`**: Faz fork/duplicação de um projeto para o seu workspace.
-  ```json
-  {
-    "project_id": "projeto-origem-id",
-    "workspace_id": "seu-workspace-id"
-  }
-  ```
-
-### 🔹 3. Interação com o Agente do Lovable
-* **`send_message`**: Envia instruções de alteração para o agente de IA do Lovable no projeto.
-  ```json
-  {
-    "project_id": "seu-project-id",
-    "message": "Adicione um gráfico de pizza mostrando a divisão de despesas por categoria na página principal"
-  }
-  ```
-* **`get_message`**: Consulta o status e a resposta de uma instrução enviada.
-  ```json
-  {
-    "project_id": "seu-project-id",
-    "message_id": "message-id-aqui"
-  }
-  ```
-* **`list_messages`**: Lista o histórico das últimas mensagens trocadas no projeto.
-  ```json
-  {
-    "project_id": "seu-project-id"
-  }
-  ```
-
-### 🔹 4. Banco de Dados Cloud (PostgreSQL)
-* **`get_database_status`**: Checa se o banco de dados cloud está habilitado no projeto.
-  ```json
-  {
-    "project_id": "seu-project-id"
-  }
-  ```
-* **`enable_database`**: Ativa a infraestrutura de banco de dados na nuvem para o projeto.
-  ```json
-  {
-    "project_id": "seu-project-id"
-  }
-  ```
-* **`query_database`**: Executa comandos SQL (SELECT, INSERT, UPDATE, DDL).
-  ```json
-  {
-    "project_id": "seu-project-id",
-    "query": "SELECT table_name FROM information_schema.tables WHERE table_schema='public';"
-  }
-  ```
-
-### 🔹 5. Conhecimento e Diretrizes (Knowledge & Skills)
-* **`get_project_knowledge`** / **`set_project_knowledge`**: Lê ou altera diretrizes técnicas específicas do projeto.
-* **`get_workspace_knowledge`** / **`set_workspace_knowledge`**: Lê ou altera padrões globais do workspace.
-* **`list_workspace_skills`**: Lista habilidades customizadas cadastradas no workspace.
-
-### 🔹 6. Analytics e Integrações
-* **`get_project_analytics`**: Consulta estatísticas reais de acesso do projeto publicado.
-* **`list_connectors`** / **`list_connections`**: Lista conectores e integrações (Slack, GitHub, Linear, etc.).
-
----
-
-## 🔒 6. Recomendações de Segurança em Produção
-
-1. **Restringir Interface de Rede (`BIND_IP`)**:
-   - Defina `BIND_IP=10.x.x.x` (IP da VPN) no arquivo `.env` para garantir que o Docker não exponha a porta `8000` na interface pública (`0.0.0.0`).
-2. **Rotação de Chaves**:
-   - Mantenha `INTERNAL_API_KEY` com alta entropia (gerada via `openssl rand -hex 32`).
-3. **Persistência Segura**:
-   - O arquivo `data/tokens.json` é ignorado no git (`.gitignore`). Nunca realize commit de tokens ou credenciais no repositório.
-4. **Reconexão Sem Downtime**:
-   - Se o token expirar ou for renovado, basta atualizar o arquivo `data/tokens.json` no host e disparar `POST /reconnect`. O proxy recarrega a sessão sem necessidade de reiniciar o contêiner.
+- **Proteção contra Cross-Tenant:** Se um agente enviar a `x-api-key` do `tenant_a`, o proxy rejeitará qualquer tentativa de acessar ferramentas do `tenant_b` com HTTP 403 Forbidden.
+- **Master Admin Key:** A `INTERNAL_API_KEY` definida no `.env` possui acesso administrativo a todos os tenants e ao painel web.
+- **Tokens Protegidos:** Todos os arquivos em `data/` são gravados atomicamente e ignorados pelo `.gitignore`.

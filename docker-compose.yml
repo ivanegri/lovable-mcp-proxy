@@ -9,7 +9,9 @@ services:
     environment:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-minha_chave_secreta_123}
       - TOKEN_FILE_PATH=/app/data/tokens.json
+      - DATA_DIR=/app/data
       - LOVABLE_MCP_URL=${LOVABLE_MCP_URL:-https://mcp.lovable.dev}
+      - USCREEN_MCP_URL=${USCREEN_MCP_URL:-https://app.uscreen.tv/mcp}
     volumes:
       - ./data:/app/data
     healthcheck:

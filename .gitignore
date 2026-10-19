@@ -2,6 +2,8 @@
 .env
 data/tokens.json
 data/*.json
+data/tokens/
+data/clients/
 !data/tokens.json.example
 
 # Python
