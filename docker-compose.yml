@@ -12,6 +12,7 @@ services:
       - DATA_DIR=/app/data
       - LOVABLE_MCP_URL=${LOVABLE_MCP_URL:-https://mcp.lovable.dev}
       - USCREEN_MCP_URL=${USCREEN_MCP_URL:-https://app.uscreen.tv/mcp}
+      - PUBLIC_URL=${PUBLIC_URL:-}
     volumes:
       - ./data:/app/data
     healthcheck:

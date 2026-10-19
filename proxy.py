@@ -31,8 +31,29 @@ logging.basicConfig(
 logger = logging.getLogger("mcp-proxy")
 
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 storage = StorageManager(DATA_DIR)
 session_manager = SessionManager(storage)
+
+
+def get_request_base_url(request: Request) -> str:
+    """Calcula a base_url pública respeitando PUBLIC_URL, headers de proxy reverso e SSL."""
+    if PUBLIC_URL:
+        return PUBLIC_URL
+
+    # Headers comuns de reverse proxy (Nginx, Caddy, Cloudflare, Traefik)
+    forwarded_proto = request.headers.get("x-forwarded-proto") or ("https" if request.headers.get("x-forwarded-ssl") == "on" else None)
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+
+    if forwarded_host:
+        proto = forwarded_proto or ("http" if "localhost" in forwarded_host or "127.0.0.1" in forwarded_host else "https")
+        return f"{proto}://{forwarded_host}"
+
+    url = str(request.base_url).rstrip("/")
+    # Se não for localhost e não for https, força https
+    if not ("localhost" in url or "127.0.0.1" in url) and url.startswith("http://"):
+        url = "https://" + url[7:]
+    return url
 
 # Armazenamento temporário de estados OAuth pendentes (state -> {service, tenant, ...})
 _pending_oauth: Dict[str, Dict[str, Any]] = {}
@@ -226,7 +247,7 @@ async def oauth_login(
         storage.create_or_update_tenant(tenant, f"Tenant {tenant}")
 
     # Determina o redirect_uri baseado no host de acesso da requisição
-    base_url = str(request.base_url).rstrip("/")
+    base_url = get_request_base_url(request)
     redirect_uri = f"{base_url}/oauth/callback"
 
     try:
