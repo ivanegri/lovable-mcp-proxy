@@ -113,6 +113,52 @@ Se preferir autenticar via terminal:
 
 Cada agente pode se comunicar diretamente com seu serviço e tenant correspondente:
 
+### ⭐ Endpoint MCP Nativo com Token Fixo (Recomendado)
+
+O proxy também é um **servidor MCP de verdade** (Streamable HTTP / JSON-RPC). Qualquer cliente MCP
+(Claude, Cursor, VS Code, N8N MCP Client, Flowise...) conecta direto com uma **chave fixa**: sem OAuth
+no agente, sem expiração. O proxy cuida do OAuth com Lovable/Uscreen por trás.
+
+| URL | Tenant |
+| :--- | :--- |
+| `https://SEU_DOMINIO/uscreen/mcp` | Definido pela chave |
+| `https://SEU_DOMINIO/lovable/mcp` | Definido pela chave |
+| `https://SEU_DOMINIO/{service}/{tenant}/mcp` | Explícito (Master Key ou chave do próprio tenant) |
+| `https://SEU_DOMINIO/mcp` | Serviço via header `x-service` (padrão: `lovable`) |
+
+Autenticação: `Authorization: Bearer SUA_CHAVE` **ou** `x-api-key: SUA_CHAVE`.
+
+Exemplo de configuração (Claude Desktop / Cursor / VS Code):
+```json
+{
+  "mcpServers": {
+    "uscreen": {
+      "type": "http",
+      "url": "https://mcp.encomendafacil.shop/uscreen/mcp",
+      "headers": { "Authorization": "Bearer SUA_CHAVE_DO_TENANT" }
+    },
+    "lovable": {
+      "type": "http",
+      "url": "https://mcp.encomendafacil.shop/lovable/mcp",
+      "headers": { "Authorization": "Bearer SUA_CHAVE_DO_TENANT" }
+    }
+  }
+}
+```
+
+Teste rápido via cURL:
+```bash
+curl -X POST "https://mcp.encomendafacil.shop/uscreen/mcp" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer SUA_CHAVE_DO_TENANT" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+> O painel web mostra a URL MCP e o JSON pronto no botão **"🤖 Setup Agente"**.
+
+### Rotas REST (alternativa)
+
 #### Uscreen:
 - **Listar Ferramentas:**
   ```bash

@@ -22,6 +22,7 @@ from providers import (
 from storage import StorageManager, INTERNAL_API_KEY
 from session_manager import SessionManager, is_auth_error
 from dashboard import get_dashboard_html
+from mcp_gateway import MCPGateway, GatewayASGIApp
 
 # Configuração de Logs
 logging.basicConfig(
@@ -123,11 +124,16 @@ def resolve_auth(
     return resolved_service, resolved_tenant
 
 
+mcp_gateway = MCPGateway(storage, session_manager)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Iniciando MCP Multi-Tenant Bridge...")
     session_manager.start_background_task()
-    yield
+    async with mcp_gateway.manager.run():
+        logger.info("Endpoint MCP nativo ativo em /mcp, /{service}/mcp e /{service}/{tenant}/mcp")
+        yield
     logger.info("Encerrando MCP Multi-Tenant Bridge...")
     await session_manager.close_all()
 
@@ -445,3 +451,12 @@ async def call_tool_legacy(tool_name: str, request: Request):
 async def reconnect_legacy(request: Request):
     resolved_service, resolved_tenant = resolve_auth(request)
     return await reconnect_scoped(resolved_service, resolved_tenant, request)
+
+
+# ==========================================
+# 5. App exportado (REST + Endpoint MCP nativo)
+# ==========================================
+# O uvicorn carrega `proxy:app`. As rotas */mcp são atendidas pelo gateway MCP;
+# todo o resto (painel, OAuth, REST) segue para o FastAPI.
+api = app
+app = GatewayASGIApp(api, mcp_gateway)

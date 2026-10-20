@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia código da aplicação
-COPY providers.py storage.py session_manager.py dashboard.py proxy.py ./
+COPY providers.py storage.py session_manager.py dashboard.py mcp_gateway.py proxy.py ./
 
 # Expõe a porta da API
 EXPOSE 8000

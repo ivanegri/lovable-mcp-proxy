@@ -595,6 +595,16 @@ def get_dashboard_html() -> str:
       </p>
 
       <div class="form-group">
+        <label>⭐ URL MCP nativa (Streamable HTTP) — use com token fixo:</label>
+        <div class="code-block" id="setup-mcp-url"></div>
+      </div>
+
+      <div class="form-group">
+        <label>Config para clientes MCP (Claude / Cursor / VS Code):</label>
+        <div class="code-block" id="setup-mcp-json"></div>
+      </div>
+
+      <div class="form-group">
         <label>URL para Listar Ferramentas (GET):</label>
         <div class="code-block" id="setup-url-list"></div>
       </div>
@@ -893,6 +903,11 @@ def get_dashboard_html() -> str:
   -d '{"parametro": "valor"}'`;
 
       document.getElementById('setup-modal-title').innerText = `Setup Agente: ${service.toUpperCase()} (${tenant})`;
+      const mcpUrl = `${base}/${service}/mcp`;
+      const mcpJson = JSON.stringify({ mcpServers: { [`${service}-${tenant}`]: { type: 'http', url: mcpUrl, headers: { Authorization: `Bearer ${apiKey}` } } } }, null, 2);
+      document.getElementById('setup-mcp-url').innerHTML = `<code>${mcpUrl}</code> <button class="copy-snippet-btn" onclick="copyText('${mcpUrl}')">Copiar</button>`;
+      document.getElementById('setup-mcp-json').innerHTML = `<code>${escapeHtml(mcpJson)}</code>`;
+      document.getElementById('setup-mcp-json').onclick = () => copyText(mcpJson);
       document.getElementById('setup-url-list').innerHTML = `<code>${listUrl}</code> <button class="copy-snippet-btn" onclick="copyText('${listUrl}')">Copiar</button>`;
       document.getElementById('setup-url-call').innerHTML = `<code>${callUrl}</code> <button class="copy-snippet-btn" onclick="copyText('${callUrl}')">Copiar</button>`;
       document.getElementById('setup-header').innerHTML = `<code>${header}</code> <button class="copy-snippet-btn" onclick="copyText('${header}')">Copiar</button>`;
