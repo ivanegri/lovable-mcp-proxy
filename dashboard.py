@@ -772,6 +772,7 @@ def get_dashboard_html() -> str:
                     ${lovableStatus.connected ? '🔄 Reconectar / Trocar' : '🚀 Conectar Lovable'}
                   </a>
                   ${lovableStatus.connected ? `
+                    ${lovableStatus.has_refresh_token ? `<button class="btn btn-secondary btn-sm" onclick="forceRefreshToken('lovable', '${tId}')">⚡ Renovar Token</button>` : ''}
                     <button class="btn btn-secondary btn-sm" onclick="inspectTools('lovable', '${tId}')">🛠️ Ver Tools</button>
                     <button class="btn btn-secondary btn-sm" onclick="showAgentSetup('lovable', '${tId}', '${tenant.api_key}')">🤖 Setup Agente</button>
                     <button class="btn btn-danger-outline btn-sm" onclick="disconnectService('lovable', '${tId}')">Desconectar</button>
@@ -800,6 +801,7 @@ def get_dashboard_html() -> str:
                     ${uscreenStatus.connected ? '🔄 Reconectar / Trocar' : '🚀 Conectar Uscreen'}
                   </a>
                   ${uscreenStatus.connected ? `
+                    ${uscreenStatus.has_refresh_token ? `<button class="btn btn-secondary btn-sm" onclick="forceRefreshToken('uscreen', '${tId}')">⚡ Renovar Token</button>` : ''}
                     <button class="btn btn-secondary btn-sm" onclick="inspectTools('uscreen', '${tId}')">🛠️ Ver Tools</button>
                     <button class="btn btn-secondary btn-sm" onclick="showAgentSetup('uscreen', '${tId}', '${tenant.api_key}')">🤖 Setup Agente</button>
                     <button class="btn btn-danger-outline btn-sm" onclick="disconnectService('uscreen', '${tId}')">Desconectar</button>
@@ -889,6 +891,25 @@ def get_dashboard_html() -> str:
         loadTenantsData();
       } catch (err) {
         alert('Erro: ' + err.message);
+      }
+    }
+
+    async function forceRefreshToken(service, tenant) {
+      showToast(`Tentando renovar token de ${service.toUpperCase()}...`);
+      try {
+        const resp = await fetch(`/${service}/${tenant}/reconnect`, {
+          method: 'POST',
+          headers: getAuthHeaders()
+        });
+        if (!resp.ok) {
+          const err = await resp.json();
+          showToast(`Falha ao renovar: ${err.detail || JSON.stringify(err)}`, 'error');
+          return;
+        }
+        showToast(`Token de ${service.toUpperCase()} renovado com sucesso!`);
+        loadTenantsData();
+      } catch (err) {
+        showToast(`Erro: ${err.message}`, 'error');
       }
     }
 

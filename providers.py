@@ -7,7 +7,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import logging
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 
 logger = logging.getLogger("mcp-proxy.providers")
 
@@ -36,7 +36,8 @@ class OAuthProvider:
         scopes: str,
         token_auth_method: str = "client_secret_basic",
         resource: Optional[str] = None,
-        default_grant_types: Optional[list] = None
+        default_grant_types: Optional[list] = None,
+        supports_cimd: bool = False
     ):
         self.service_id = service_id
         self.name = name
@@ -48,6 +49,8 @@ class OAuthProvider:
         self.token_auth_method = token_auth_method
         self.resource = resource
         self.default_grant_types = default_grant_types or ["authorization_code", "refresh_token"]
+        # Client ID Metadata Document: client_id = URL https de um JSON hospedado por nós
+        self.supports_cimd = supports_cimd
 
 
 PROVIDERS: Dict[str, OAuthProvider] = {
@@ -61,7 +64,9 @@ PROVIDERS: Dict[str, OAuthProvider] = {
         scopes="offline projects:read projects:write workspaces:read workspaces:write",
         token_auth_method="client_secret_basic",
         resource=None,
-        default_grant_types=["authorization_code", "refresh_token"]
+        default_grant_types=["authorization_code", "refresh_token"],
+        # Lovable só permite registro dinâmico para localhost; para domínios públicos usa CIMD
+        supports_cimd=True
     ),
     "uscreen": OAuthProvider(
         service_id="uscreen",
@@ -99,8 +104,80 @@ def _client_cache_key(provider: OAuthProvider, redirect_uri: str) -> str:
     return f"{provider.service_id}_{uri_hash}.json"
 
 
+def is_loopback_uri(uri: str) -> bool:
+    host = (urllib.parse.urlparse(uri).hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
+CALLBACK_PATH = "/oauth/callback"
+
+
+def cimd_client_id_for(provider: OAuthProvider, redirect_uri: str) -> str:
+    """URL do Client ID Metadata Document (servido pelo próprio proxy)."""
+    base = redirect_uri[: -len(CALLBACK_PATH)] if redirect_uri.endswith(CALLBACK_PATH) else redirect_uri.rstrip("/")
+    return f"{base}/oauth/client-metadata/{provider.service_id}.json"
+
+
+def build_client_metadata_document(provider: OAuthProvider, base_url: str) -> Dict[str, Any]:
+    """Documento JSON exigido pelo fluxo CIMD. O client_id DEVE ser exatamente a URL do documento."""
+    base = base_url.rstrip("/")
+    return {
+        "client_id": f"{base}/oauth/client-metadata/{provider.service_id}.json",
+        "client_name": f"MCP Hub ({provider.name})",
+        "client_uri": base,
+        "redirect_uris": [f"{base}{CALLBACK_PATH}"],
+        "grant_types": provider.default_grant_types,
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+        "scope": provider.scopes,
+    }
+
+
+def list_known_clients(provider: OAuthProvider, data_dir: str) -> List[Tuple[str, Optional[str]]]:
+    """Todos os (client_id, client_secret) já usados para este provedor (cache + legado).
+
+    Usado no refresh de tokens antigos que não guardaram o client_id junto.
+    """
+    found: List[Tuple[str, Optional[str]]] = []
+    paths = []
+    clients_dir = os.path.join(data_dir, "clients")
+    if os.path.isdir(clients_dir):
+        paths += sorted(
+            (os.path.join(clients_dir, f) for f in os.listdir(clients_dir)
+             if f.startswith(f"{provider.service_id}_") and f.endswith(".json")),
+            key=os.path.getmtime, reverse=True
+        )
+    if provider.service_id == "lovable":
+        paths.append(os.path.join(data_dir, "oauth_client.json"))
+    for p in paths:
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if d.get("client_id") and (d["client_id"], d.get("client_secret")) not in found:
+                found.append((d["client_id"], d.get("client_secret")))
+        except Exception:
+            continue
+    if provider.supports_cimd:
+        public_url = os.getenv("PUBLIC_URL", "").rstrip("/")
+        if public_url:
+            cimd_id = f"{public_url}/oauth/client-metadata/{provider.service_id}.json"
+            if (cimd_id, None) not in found:
+                found.append((cimd_id, None))
+    return found
+
+
 def get_or_register_client(provider: OAuthProvider, redirect_uri: str, data_dir: str) -> Tuple[str, Optional[str]]:
     """Obtém ou registra cliente OAuth dinamicamente para o provedor e redirect_uri especificados."""
+    # CIMD: domínio público + provedor que suporta -> sem registro, client_id é a URL do documento
+    if provider.supports_cimd and not is_loopback_uri(redirect_uri):
+        if not redirect_uri.startswith("https://"):
+            raise RuntimeError(
+                f"{provider.name} exige HTTPS para domínios públicos. Configure PUBLIC_URL=https://seu-dominio no .env."
+            )
+        client_id = cimd_client_id_for(provider, redirect_uri)
+        logger.info(f"Usando Client ID Metadata Document para {provider.name}: {client_id}")
+        return client_id, None
+
     clients_dir = os.path.join(data_dir, "clients")
     os.makedirs(clients_dir, exist_ok=True)
     cache_file = os.path.join(clients_dir, _client_cache_key(provider, redirect_uri))

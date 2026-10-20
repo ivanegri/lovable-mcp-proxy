@@ -17,7 +17,8 @@ from providers import (
     generate_pkce,
     get_or_register_client,
     build_authorization_url,
-    exchange_code_for_tokens
+    exchange_code_for_tokens,
+    build_client_metadata_document
 )
 from storage import StorageManager, INTERNAL_API_KEY
 from session_manager import SessionManager, is_auth_error
@@ -235,6 +236,19 @@ async def disconnect_service_token(service: str, tenant_id: str, request: Reques
 # 3. Fluxo OAuth 2.1 no Navegador (1-Click)
 # ==========================================
 
+@app.get("/oauth/client-metadata/{service}.json")
+async def oauth_client_metadata(service: str, request: Request):
+    """Client ID Metadata Document (CIMD). O provedor (ex.: Lovable) busca este JSON para
+    validar o client_id, dispensando o registro dinâmico. Precisa estar acessível publicamente via HTTPS."""
+    if service.lower() not in PROVIDERS:
+        raise HTTPException(status_code=404, detail="Serviço desconhecido")
+    provider = get_provider(service)
+    return JSONResponse(
+        build_client_metadata_document(provider, get_request_base_url(request)),
+        headers={"Cache-Control": "public, max-age=300"}
+    )
+
+
 @app.get("/oauth/login")
 async def oauth_login(
     service: str = Query(..., description="lovable ou uscreen"),
@@ -326,6 +340,9 @@ async def oauth_callback(
 
         tokens["expires_at"] = int(time.time()) + int(tokens.get("expires_in", 3600))
         tokens["refreshed_at"] = int(time.time())
+        # Guarda o client que emitiu o token: o refresh precisa usar exatamente o mesmo
+        tokens["client_id"] = pending["client_id"]
+        tokens["client_secret"] = pending["client_secret"]
         storage.save_tokens(service, tenant, tokens)
 
         # Conecta a sessão imediatamente em segundo plano

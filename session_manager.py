@@ -9,7 +9,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client, create_mcp_http_client
 from mcp.client.sse import sse_client
 
-from providers import get_provider, refresh_access_token, get_or_register_client
+from providers import get_provider, refresh_access_token, list_known_clients
 from storage import StorageManager
 
 logger = logging.getLogger("mcp-proxy.sessions")
@@ -71,26 +71,34 @@ class SessionManager:
             logger.error(f"⚠️ Sem refresh_token para ({service}, {tenant_id}). Reautenticação necessária.")
             return None
 
-        # Obtém client_id e client_secret registrados
-        # Usa um redirect_uri padrão ou busca no cache do provedor
-        dummy_redirect = "http://localhost:8000/oauth/callback"
-        try:
-            client_id, client_secret = get_or_register_client(provider, dummy_redirect, self.storage.data_dir)
-        except Exception as e:
-            logger.error(f"Erro ao obter client OAuth para {service}: {e}")
+        # O refresh precisa do MESMO client_id que emitiu o token.
+        # 1) client gravado junto do token (logins novos)  2) clientes conhecidos (tokens antigos)
+        candidates = []
+        if tokens.get("client_id"):
+            candidates.append((tokens["client_id"], tokens.get("client_secret")))
+        for c in list_known_clients(provider, self.storage.data_dir):
+            if c not in candidates:
+                candidates.append(c)
+        if not candidates:
+            logger.error(f"⚠️ Nenhum client OAuth conhecido para ({service}, {tenant_id}). Reconecte pelo painel.")
             return None
 
         logger.info(f"🔄 Renovando access_token de ({service}, {tenant_id}) via refresh_token...")
-        try:
-            new_tokens = await asyncio.to_thread(
-                refresh_access_token,
-                provider,
-                client_id,
-                client_secret,
-                refresh_token_str
-            )
-        except Exception as e:
-            logger.error(f"⚠️ Falha na renovação de token para ({service}, {tenant_id}): {e}")
+        new_tokens = None
+        last_error = None
+        for client_id, client_secret in candidates:
+            try:
+                new_tokens = await asyncio.to_thread(
+                    refresh_access_token, provider, client_id, client_secret, refresh_token_str
+                )
+                tokens["client_id"] = client_id
+                tokens["client_secret"] = client_secret
+                break
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Refresh com client {client_id[:12]}... falhou: {e}")
+        if new_tokens is None:
+            logger.error(f"⚠️ Falha na renovação de token para ({service}, {tenant_id}): {last_error}")
             return None
 
         new_access = new_tokens.get("access_token")

@@ -223,6 +223,8 @@ def main():
 
     tokens["expires_at"] = int(time.time()) + int(tokens.get("expires_in", 3600))
     tokens["refreshed_at"] = int(time.time())
+    tokens["client_id"] = client_id
+    tokens["client_secret"] = client_secret
 
     token_path = storage.get_token_path(service, tenant)
     storage.save_tokens(service, tenant, tokens)
