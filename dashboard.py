@@ -578,6 +578,7 @@ def get_dashboard_html() -> str:
       </div>
       <div class="header-actions">
         <button class="btn btn-secondary" onclick="openApiKeyModal()">🔑 Trocar API Key</button>
+        <button id="btn-logout" class="btn btn-danger-outline" style="display: none;" onclick="logoutDashboard()">🚪 Sair</button>
         <button id="btn-new-tenant" class="btn btn-primary" onclick="openNewTenantModal()">+ Novo Tenant</button>
       </div>
     </header>
@@ -821,6 +822,30 @@ def get_dashboard_html() -> str:
     </div>
   </div>
 
+  <!-- Modal: Login / API Key -->
+  <div id="modal-login" class="modal-overlay">
+    <div class="modal-card" style="max-width: 440px;">
+      <div class="modal-header">
+        <h2>🔑 Acessar Painel</h2>
+        <button class="close-btn" onclick="closeModal('modal-login')">&times;</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+        Informe sua <strong>API Key do Tenant</strong> para gerenciar apenas suas conexões, ou a <strong>Master Key</strong> para acesso administrativo.
+      </p>
+      <div id="login-error" style="display: none; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 14px;"></div>
+      <form id="form-login" onsubmit="handleLoginSubmit(event)">
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" id="login-api-key" class="form-control" autocomplete="off" placeholder="sk_... ou Master Key" required>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-login')">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Entrar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Modal: Visualizador de Ferramentas -->
   <div id="modal-tools" class="modal-overlay">
     <div class="modal-card" style="max-width: 750px;">
@@ -882,14 +907,45 @@ def get_dashboard_html() -> str:
       return headers;
     }
 
+    function clearDashboardView() {
+      ['stat-lovable-connected', 'stat-uscreen-connected', 'stat-meta-connected', 'stat-yungas-connected', 'stat-sults-connected', 'stat-omie-connected', 'stat-total-tenants'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = '0';
+      });
+      const btnNewTenant = document.getElementById('btn-new-tenant');
+      if (btnNewTenant) btnNewTenant.style.display = 'none';
+      const btnLogout = document.getElementById('btn-logout');
+      if (btnLogout) btnLogout.style.display = 'none';
+      const container = document.getElementById('tenants-list');
+      if (container) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 48px 20px; color: var(--text-muted);">
+            <p style="margin-bottom: 16px;">Sessão encerrada. Informe sua API Key (do tenant ou Master Key) para acessar o painel.</p>
+            <button class="btn btn-primary" onclick="openApiKeyModal()">🔑 Entrar com API Key</button>
+          </div>
+        `;
+      }
+    }
+
     async function loadTenantsData() {
+      if (!masterKey) {
+        clearDashboardView();
+        openApiKeyModal();
+        return;
+      }
       try {
         const resp = await fetch('/api/tenants', { headers: getAuthHeaders() });
         if (resp.status === 401) {
-          askForMasterKey();
+          masterKey = '';
+          localStorage.removeItem('mcp_master_key');
+          clearDashboardView();
+          openApiKeyModal('API Key inválida ou não autorizada. Tente novamente.');
           return;
         }
         const data = await resp.json();
+        closeModal('modal-login');
+        const btnLogout = document.getElementById('btn-logout');
+        if (btnLogout) btnLogout.style.display = '';
         renderDashboard(data);
       } catch (err) {
         console.error(err);
@@ -1266,17 +1322,40 @@ def get_dashboard_html() -> str:
       document.getElementById(id).style.display = 'none';
     }
 
-    function askForMasterKey() {
-      const key = prompt('Informe sua API Key (Master Key ou chave do seu tenant):');
-      if (key) {
-        masterKey = key.trim();
-        localStorage.setItem('mcp_master_key', masterKey);
-        loadTenantsData();
+    function openApiKeyModal(errorMsg = '') {
+      const form = document.getElementById('form-login');
+      if (form) form.reset();
+      const errBox = document.getElementById('login-error');
+      if (errBox) {
+        errBox.innerText = errorMsg || '';
+        errBox.style.display = errorMsg ? 'block' : 'none';
       }
+      document.getElementById('modal-login').style.display = 'flex';
+      setTimeout(() => {
+        const input = document.getElementById('login-api-key');
+        if (input) input.focus();
+      }, 50);
     }
 
-    function openApiKeyModal() {
-      askForMasterKey();
+    function askForMasterKey() {
+      openApiKeyModal();
+    }
+
+    function handleLoginSubmit(e) {
+      e.preventDefault();
+      const key = document.getElementById('login-api-key').value.trim();
+      if (!key) return;
+      masterKey = key;
+      localStorage.setItem('mcp_master_key', masterKey);
+      loadTenantsData();
+    }
+
+    function logoutDashboard() {
+      masterKey = '';
+      localStorage.removeItem('mcp_master_key');
+      clearDashboardView();
+      showToast('Sessão encerrada com sucesso.');
+      openApiKeyModal();
     }
 
     async function handleCreateTenant(e) {
