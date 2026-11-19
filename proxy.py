@@ -95,15 +95,8 @@ def clean_expired_oauth_states():
         _pending_oauth.pop(k, None)
 
 
-def resolve_auth(
-    request: Request,
-    target_service: Optional[str] = None,
-    target_tenant: Optional[str] = None
-) -> Tuple[str, str]:
-    """Valida a autenticação e resolve o serviço e o tenant para a requisição.
-
-    Retorna: (service, tenant_id)
-    """
+def authenticate_request(request: Request) -> Dict[str, Any]:
+    """Valida o header x-api-key ou Authorization: Bearer e retorna o registro do tenant (ou Master)."""
     x_api_key = request.headers.get("x-api-key")
     if not x_api_key:
         auth_header = request.headers.get("authorization", "")
@@ -122,7 +115,19 @@ def resolve_auth(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="API Key inválida ou não autorizada."
         )
+    return matched
 
+
+def resolve_auth(
+    request: Request,
+    target_service: Optional[str] = None,
+    target_tenant: Optional[str] = None
+) -> Tuple[str, str]:
+    """Valida a autenticação e resolve o serviço e o tenant para a requisição.
+
+    Retorna: (service, tenant_id)
+    """
+    matched = authenticate_request(request)
     is_master = matched.get("is_master", False)
 
     # Resolução do Tenant
@@ -211,18 +216,33 @@ class CreateTenantRequest(BaseModel):
 
 @app.get("/api/tenants")
 async def list_tenants(request: Request):
-    """Lista todos os tenants e seu status de conexão (Requer Master Key ou chave válida)."""
-    resolve_auth(request)
+    """Lista todos os tenants (Master Key) ou apenas o tenant dono da API Key informada."""
+    matched = authenticate_request(request)
+    is_master = bool(matched.get("is_master", False))
+    if is_master:
+        return {
+            "is_master": True,
+            "tenants": storage.get_all_tenants(),
+            "tokens_status": storage.list_all_token_records()
+        }
+
+    tenant_id = matched["id"]
+    tenant_info = storage.get_tenant(tenant_id)
+    tokens_status = [r for r in storage.list_all_token_records() if r.get("tenant_id") == tenant_id]
     return {
-        "tenants": storage.get_all_tenants(),
-        "tokens_status": storage.list_all_token_records()
+        "is_master": False,
+        "tenant_id": tenant_id,
+        "tenants": {tenant_id: tenant_info} if tenant_info else {},
+        "tokens_status": tokens_status
     }
 
 
 @app.post("/api/tenants")
 async def create_tenant(payload: CreateTenantRequest, request: Request):
-    """Cria ou atualiza um tenant."""
-    resolve_auth(request)
+    """Cria ou atualiza um tenant (requer Master Key)."""
+    matched = authenticate_request(request)
+    if not matched.get("is_master", False):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas a Master Key pode criar ou editar tenants.")
     try:
         created = storage.create_or_update_tenant(
             tenant_id=payload.id,
@@ -237,8 +257,10 @@ async def create_tenant(payload: CreateTenantRequest, request: Request):
 
 @app.delete("/api/tenants/{tenant_id}")
 async def delete_tenant(tenant_id: str, request: Request):
-    """Remove um tenant e suas credenciais associadas."""
-    resolve_auth(request)
+    """Remove um tenant e suas credenciais associadas (requer Master Key)."""
+    matched = authenticate_request(request)
+    if not matched.get("is_master", False):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas a Master Key pode excluir tenants.")
     try:
         success = storage.delete_tenant(tenant_id)
         if not success:

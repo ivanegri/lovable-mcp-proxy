@@ -577,8 +577,8 @@ def get_dashboard_html() -> str:
         </div>
       </div>
       <div class="header-actions">
-        <button class="btn btn-secondary" onclick="openApiKeyModal()">🔑 Master Key</button>
-        <button class="btn btn-primary" onclick="openNewTenantModal()">+ Novo Tenant</button>
+        <button class="btn btn-secondary" onclick="openApiKeyModal()">🔑 Trocar API Key</button>
+        <button id="btn-new-tenant" class="btn btn-primary" onclick="openNewTenantModal()">+ Novo Tenant</button>
       </div>
     </header>
 
@@ -608,7 +608,7 @@ def get_dashboard_html() -> str:
           <p>Contas Meta Ads Ativas</p>
         </div>
       </div>
-      <div class="stat-card">
+      <div id="stat-card-tenants" class="stat-card">
         <div class="stat-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">🛡️</div>
         <div class="stat-meta">
           <h3 id="stat-total-tenants">0</h3>
@@ -639,7 +639,7 @@ def get_dashboard_html() -> str:
     </div>
 
     <!-- Tenants Section -->
-    <h2 style="font-size: 18px; margin-bottom: 16px; font-weight: 600;">Seus Tenants & Conexões</h2>
+    <h2 id="section-tenants-title" style="font-size: 18px; margin-bottom: 16px; font-weight: 600;">Seus Tenants &amp; Conexões</h2>
     <div id="tenants-list" class="tenants-grid">
       <div style="text-align: center; padding: 40px; color: var(--text-muted);">
         Carregando status dos tenants...
@@ -841,12 +841,19 @@ def get_dashboard_html() -> str:
     // Recupera Master Key salva no navegador se houver
     let masterKey = localStorage.getItem('mcp_master_key') || '';
 
-    // Verifica parâmetros de URL para feedback pós-OAuth
+    // Verifica parâmetros de URL (?key=... para acesso direto do tenant e feedback pós-OAuth)
     window.addEventListener('DOMContentLoaded', () => {
       const urlParams = new URLSearchParams(window.location.search);
+      const urlKey = urlParams.get('key') || urlParams.get('api_key');
       const connected = urlParams.get('connected');
       const tenant = urlParams.get('tenant');
       const error = urlParams.get('error');
+
+      if (urlKey) {
+        masterKey = urlKey.trim();
+        localStorage.setItem('mcp_master_key', masterKey);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
 
       if (connected) {
         showToast(`🎉 Sucesso! Serviço ${connected.toUpperCase()} conectado para o tenant "${tenant}".`, 'success');
@@ -895,8 +902,16 @@ def get_dashboard_html() -> str:
     }
 
     function renderDashboard(data) {
+      const isMaster = data.is_master !== false;
       const tenants = data.tenants || {};
       const tokensStatus = data.tokens_status || [];
+
+      const btnNewTenant = document.getElementById('btn-new-tenant');
+      if (btnNewTenant) btnNewTenant.style.display = isMaster ? '' : 'none';
+      const statCardTenants = document.getElementById('stat-card-tenants');
+      if (statCardTenants) statCardTenants.style.display = isMaster ? '' : 'none';
+      const sectionTitle = document.getElementById('section-tenants-title');
+      if (sectionTitle) sectionTitle.innerText = isMaster ? 'Seus Tenants & Conexões' : 'Suas Conexões';
 
       let lovableCount = 0;
       let uscreenCount = 0;
@@ -954,7 +969,8 @@ def get_dashboard_html() -> str:
                   <span id="key-${tId}">${escapeHtml(tenant.api_key)}</span>
                   <button class="btn btn-secondary btn-sm" onclick="copyText('${escapeHtml(tenant.api_key)}')">Copiar</button>
                 </div>
-                ${tId !== 'default' ? `<button class="btn btn-danger-outline btn-sm" onclick="deleteTenant('${tId}')">Excluir</button>` : ''}
+                ${isMaster ? `<button class="btn btn-secondary btn-sm" onclick="copyText('${window.location.origin}/?key=${encodeURIComponent(tenant.api_key)}')">🔗 Link do Painel</button>` : ''}
+                ${isMaster && tId !== 'default' ? `<button class="btn btn-danger-outline btn-sm" onclick="deleteTenant('${tId}')">Excluir</button>` : ''}
               </div>
             </div>
 
@@ -1251,10 +1267,10 @@ def get_dashboard_html() -> str:
     }
 
     function askForMasterKey() {
-      const key = prompt('Informe a INTERNAL_API_KEY para gerenciar o proxy:');
+      const key = prompt('Informe sua API Key (Master Key ou chave do seu tenant):');
       if (key) {
-        masterKey = key;
-        localStorage.setItem('mcp_master_key', key);
+        masterKey = key.trim();
+        localStorage.setItem('mcp_master_key', masterKey);
         loadTenantsData();
       }
     }
