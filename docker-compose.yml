@@ -24,6 +24,8 @@ services:
       - YUNGAS_PEX_API_KEY=${YUNGAS_PEX_API_KEY:-}
       - SULTS_TOKEN_V1=${SULTS_TOKEN_V1:-}
       - SULTS_TOKEN_V2=${SULTS_TOKEN_V2:-}
+      - OMIE_APP_KEY=${OMIE_APP_KEY:-}
+      - OMIE_APP_SECRET=${OMIE_APP_SECRET:-}
     volumes:
       - ./data:/app/data
     healthcheck:

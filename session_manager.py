@@ -135,8 +135,8 @@ class SessionManager:
     async def _connect_locked(self, info: TenantSessionInfo, force_refresh: bool = False) -> ClientSession:
         service = info.service
         tenant_id = info.tenant_id
-        if service in ("meta", "yungas", "sults"):
-            # Servidores MCP locais (Meta Ads, Yungas e Sults) não usam stream MCP upstream
+        if service in ("meta", "yungas", "sults", "omie"):
+            # Servidores MCP locais (Meta Ads, Yungas, Sults e Omie) não usam stream MCP upstream
             info.last_connected_at = time.time()
             info.last_error = None
             return None
@@ -257,7 +257,7 @@ class SessionManager:
             try:
                 records = self.storage.list_all_token_records()
                 for rec in records:
-                    if not rec.get("connected") or rec["service"] in ("meta", "yungas", "sults"):
+                    if not rec.get("connected") or rec["service"] in ("meta", "yungas", "sults", "omie"):
                         continue
                     s = rec["service"]
                     t = rec["tenant_id"]

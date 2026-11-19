@@ -39,6 +39,8 @@ from yungas_mcp_server import YungasMCPServer
 from yungas_client import request_token, YungasError, DEFAULT_SCOPES
 from sults_mcp_server import SultsMCPServer
 from sults_client import validate_token as validate_sults_token, SultsError
+from omie_mcp_server import OmieMCPServer
+from omie_client import validate_credentials as validate_omie_credentials, OmieError
 
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
@@ -50,6 +52,7 @@ meta_db = MetaDatabase(os.path.join(DATA_DIR, "meta_ads.sqlite"))
 meta_mcp_server = MetaAdsMCPServer(storage, meta_db)
 yungas_mcp_server = YungasMCPServer(storage)
 sults_mcp_server = SultsMCPServer(storage)
+omie_mcp_server = OmieMCPServer(storage)
 
 mcp_gateway = MCPGateway(
     storage,
@@ -57,6 +60,7 @@ mcp_gateway = MCPGateway(
     meta_mcp_server=meta_mcp_server,
     yungas_mcp_server=yungas_mcp_server,
     sults_mcp_server=sults_mcp_server,
+    omie_mcp_server=omie_mcp_server,
 )
 
 
@@ -335,6 +339,45 @@ async def save_sults_credentials(tenant_id: str, payload: SultsCredentials, requ
     }
 
 
+class OmieCredentials(BaseModel):
+    app_key: str
+    app_secret: str
+
+
+@app.post("/api/tenants/{tenant_id}/omie/credentials")
+async def save_omie_credentials(tenant_id: str, payload: OmieCredentials, request: Request):
+    """Credenciais Omie: valida app_key e app_secret (ListarEmpresas) e salva para o tenant."""
+    resolve_auth(request, target_service="omie", target_tenant=tenant_id)
+    if not storage.get_tenant(tenant_id):
+        storage.create_or_update_tenant(tenant_id, f"Tenant {tenant_id}")
+
+    app_key = (payload.app_key or "").strip()
+    app_secret = (payload.app_secret or "").strip()
+    if not app_key or not app_secret:
+        raise HTTPException(status_code=400, detail="Informe APP_KEY e APP_SECRET da Omie.")
+
+    try:
+        info = await validate_omie_credentials(app_key, app_secret)
+    except OmieError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contatar a Omie: {e}")
+
+    creds = {
+        "app_key": app_key,
+        "app_secret": app_secret,
+        "empresa": info.get("empresa", ""),
+        "updated_at": int(time.time()),
+    }
+    storage.save_tokens("omie", tenant_id.lower(), creds)
+    emp = f" ({info['empresa']})" if info.get("empresa") else ""
+    return {
+        "status": "ok",
+        "empresa": info.get("empresa", ""),
+        "message": f"Omie ERP conectada para '{tenant_id}'{emp}.",
+    }
+
+
 # ==========================================
 # 3. Fluxo OAuth 2.1 no Navegador (1-Click)
 # ==========================================
@@ -482,6 +525,9 @@ async def list_tools_scoped(
     if resolved_service == "sults":
         res = await sults_mcp_server.list_tools(resolved_tenant)
         return {"service": "sults", "tenant": resolved_tenant, "tools": [t.model_dump() for t in res.tools]}
+    if resolved_service == "omie":
+        res = await omie_mcp_server.list_tools(resolved_tenant)
+        return {"service": "omie", "tenant": resolved_tenant, "tools": [t.model_dump() for t in res.tools]}
 
     try:
         response = await session_manager.run_with_session(
@@ -527,6 +573,9 @@ async def call_tool_scoped(
     if resolved_service == "sults":
         res = await sults_mcp_server.call_tool(resolved_tenant, tool_name, arguments)
         return {"service": "sults", "tenant": resolved_tenant, "result": res.model_dump()}
+    if resolved_service == "omie":
+        res = await omie_mcp_server.call_tool(resolved_tenant, tool_name, arguments)
+        return {"service": "omie", "tenant": resolved_tenant, "result": res.model_dump()}
 
     try:
         result = await session_manager.run_with_session(
@@ -566,6 +615,16 @@ async def reconnect_scoped(service: str, tenant: str, request: Request):
             if not checked:
                 raise SultsError(f"Nenhum token Sults configurado para '{resolved_tenant}'.")
             return {"status": "ok", "message": f"Tokens Sults ({resolved_tenant}: {', '.join(checked)}) validados!"}
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+    if resolved_service == "omie":
+        try:
+            creds = omie_mcp_server.client.load_credentials(resolved_tenant)
+            if not creds.get("app_key") or not creds.get("app_secret"):
+                raise OmieError(f"Credenciais Omie não configuradas para '{resolved_tenant}'.")
+            info = await validate_omie_credentials(creds["app_key"], creds["app_secret"])
+            emp = f" ({info['empresa']})" if info.get("empresa") else ""
+            return {"status": "ok", "message": f"Credenciais Omie ({resolved_tenant}{emp}) validadas!"}
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 

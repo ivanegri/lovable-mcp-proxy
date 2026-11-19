@@ -239,3 +239,17 @@ Serviço `sults`, acessível em `/sults/mcp` e `/sults/{tenant}/mcp` (mesma chav
 - **Tools:** 88 tools geradas automaticamente a partir das specs OpenAPI em `sults_specs/` (27 `sults_v1_*` + 61 `sults_v2_*`),
   incluindo upload multipart (`sults_v2_enviarArquivoV2` com `file_base64` e `filename`), mais a tool genérica `sults_request`.
 - **Limite da API:** 2 requisições por segundo por IP (compartilhado entre todos os tenants via limitador global de 0,5 s + backoff exponencial em 429/5xx).
+
+## Omie ERP (Catálogo completo de 138 serviços / 500 métodos)
+
+Serviço `omie`, acessível em `/omie/mcp` e `/omie/{tenant}/mcp` (mesma chave fixa dos demais).
+
+- **Credenciais:** painel → card "Omie ERP MCP" → *Configurar Omie*. Informe `APP_KEY` e `APP_SECRET`
+  (gerados em *Meus Aplicativos* no Portal do Desenvolvedor Omie). Validados contra `ListarEmpresas` ao salvar.
+- **Fallback via `.env`** (tenant `default`): `OMIE_APP_KEY`, `OMIE_APP_SECRET`.
+- **Tools (25 no total, 100% dos serviços cobertos):**
+  - 4 tools de catálogo e execução dinâmica baseadas nos WSDLs oficiais (`omie_specs/catalog.json`):
+    `omie_list_services`, `omie_get_service_methods`, `omie_get_method_schema` e `omie_call`.
+  - 21 atalhos diretos para as rotinas mais usadas do ERP (Empresas, Clientes, Produtos, Estoque,
+    Pedidos de Venda, NF-e, Resumo Financeiro, Contas a Pagar/Receber, Contas Correntes, OS e CRM).
+- **Limite da API:** semáforo global de 4 requisições simultâneas + espaçamento mínimo de 0,25 s (~4 req/s) e backoff exponencial em 429/5xx/faults de concorrência.

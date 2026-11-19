@@ -117,6 +117,19 @@ PROVIDERS: Dict[str, OAuthProvider] = {
         token_auth_method="none",
         resource=None,
         default_grant_types=[]
+    ),
+    # Omie ERP: servidor MCP local; autenticação por APP_KEY + APP_SECRET no corpo JSON
+    "omie": OAuthProvider(
+        service_id="omie",
+        name="Omie ERP",
+        mcp_url="local://omie",
+        registration_endpoint="",
+        authorization_endpoint="",
+        token_endpoint="",
+        scopes="",
+        token_auth_method="none",
+        resource=None,
+        default_grant_types=[]
     )
 }
 

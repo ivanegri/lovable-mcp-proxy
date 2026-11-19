@@ -117,6 +117,7 @@ class StorageManager:
             self.delete_tokens("meta", tenant_id)
             self.delete_tokens("yungas", tenant_id)
             self.delete_tokens("sults", tenant_id)
+            self.delete_tokens("omie", tenant_id)
             return True
         return False
 
@@ -183,7 +184,7 @@ class StorageManager:
         """Lista o status de tokens de todos os pares (serviço, tenant) existentes."""
         records = []
         tenants = self.get_all_tenants()
-        services = ["lovable", "uscreen", "meta", "yungas", "sults"]
+        services = ["lovable", "uscreen", "meta", "yungas", "sults", "omie"]
 
         for t_id, t_info in tenants.items():
             for s in services:
@@ -198,12 +199,18 @@ class StorageManager:
                     and os.getenv("YUNGAS_CLIENT_ID", "").strip()
                     and os.getenv("YUNGAS_CLIENT_SECRET", "").strip()
                 )
+                has_omie_env = bool(
+                    s == "omie" and t_id == "default"
+                    and os.getenv("OMIE_APP_KEY", "").strip()
+                    and os.getenv("OMIE_APP_SECRET", "").strip()
+                )
                 has_tokens = (
                     (has_v1 or has_v2) if s == "sults" else (
-                        has_yungas_env or (
+                        has_yungas_env or has_omie_env or (
                             tokens is not None and bool(
                                 tokens.get("access_token") or tokens.get("token") or
-                                (s == "yungas" and tokens.get("client_id") and tokens.get("client_secret"))
+                                (s == "yungas" and tokens.get("client_id") and tokens.get("client_secret")) or
+                                (s == "omie" and tokens.get("app_key") and tokens.get("app_secret"))
                             )
                         )
                     )

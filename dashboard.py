@@ -30,6 +30,8 @@ def get_dashboard_html() -> str:
       --yungas-gradient: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
       --sults: #06b6d4;
       --sults-gradient: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
+      --omie: #10b981;
+      --omie-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
       --success: #10b981;
       --warning: #f59e0b;
       --danger: #ef4444;
@@ -376,6 +378,20 @@ def get_dashboard_html() -> str:
       filter: brightness(1.1);
     }
 
+    .service-omie::before {
+      background: var(--omie-gradient);
+    }
+
+    .btn-omie {
+      background: var(--omie-gradient);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-omie:hover {
+      filter: brightness(1.1);
+    }
+
     .service-header {
       display: flex;
       justify-content: space-between;
@@ -557,7 +573,7 @@ def get_dashboard_html() -> str:
         <div class="logo-badge">⚡</div>
         <div class="brand-title">
           <h1>MCP Multi-Tenant Bridge</h1>
-          <p>Gateway unificado Lovable, Uscreen, Meta Ads, Yungas &amp; Sults com isolamento total</p>
+          <p>Gateway unificado Lovable, Uscreen, Meta Ads, Yungas, Sults &amp; Omie ERP com isolamento total</p>
         </div>
       </div>
       <div class="header-actions">
@@ -611,6 +627,13 @@ def get_dashboard_html() -> str:
         <div class="stat-meta">
           <h3 id="stat-sults-connected">0</h3>
           <p>Contas Sults Ativas</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">📊</div>
+        <div class="stat-meta">
+          <h3 id="stat-omie-connected">0</h3>
+          <p>Contas Omie Ativas</p>
         </div>
       </div>
     </div>
@@ -718,6 +741,34 @@ def get_dashboard_html() -> str:
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('modal-sults')">Cancelar</button>
           <button type="submit" class="btn btn-sults">Validar &amp; Salvar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Credenciais Omie ERP -->
+  <div id="modal-omie" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="omie-modal-title">Credenciais Omie ERP</h2>
+        <button class="close-btn" onclick="closeModal('modal-omie')">&times;</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+        Credenciais geradas em <strong>Meus Aplicativos</strong> no Portal do Desenvolvedor Omie (<code>developer.omie.com.br</code>).
+      </p>
+      <form id="form-omie" onsubmit="handleOmieLogin(event)">
+        <input type="hidden" id="omie-tenant">
+        <div class="form-group">
+          <label>APP_KEY</label>
+          <input type="text" id="omie-app-key" class="form-control" autocomplete="off" placeholder="Chave do aplicativo Omie" required>
+        </div>
+        <div class="form-group">
+          <label>APP_SECRET</label>
+          <input type="password" id="omie-app-secret" class="form-control" autocomplete="new-password" placeholder="Segredo do aplicativo Omie" required>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-omie')">Cancelar</button>
+          <button type="submit" class="btn btn-omie">Validar &amp; Salvar</button>
         </div>
       </form>
     </div>
@@ -852,6 +903,7 @@ def get_dashboard_html() -> str:
       let metaCount = 0;
       let yungasCount = 0;
       let sultsCount = 0;
+      let omieCount = 0;
       const tenantKeys = Object.keys(tenants);
 
       tokensStatus.forEach(t => {
@@ -861,6 +913,7 @@ def get_dashboard_html() -> str:
           if (t.service === 'meta') metaCount++;
           if (t.service === 'yungas') yungasCount++;
           if (t.service === 'sults') sultsCount++;
+          if (t.service === 'omie') omieCount++;
         }
       });
 
@@ -869,6 +922,7 @@ def get_dashboard_html() -> str:
       document.getElementById('stat-meta-connected').innerText = metaCount;
       document.getElementById('stat-yungas-connected').innerText = yungasCount;
       document.getElementById('stat-sults-connected').innerText = sultsCount;
+      document.getElementById('stat-omie-connected').innerText = omieCount;
       document.getElementById('stat-total-tenants').innerText = tenantKeys.length;
 
       const container = document.getElementById('tenants-list');
@@ -885,6 +939,7 @@ def get_dashboard_html() -> str:
         const yungasStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'yungas') || {};
         const sultsStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'sults') || {};
         const sultsVersions = [sultsStatus.has_v1 ? 'v1' : null, sultsStatus.has_v2 ? 'v2' : null].filter(Boolean);
+        const omieStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'omie') || {};
 
         return `
           <div class="tenant-card">
@@ -1050,10 +1105,70 @@ def get_dashboard_html() -> str:
                   ` : ''}
                 </div>
               </div>
+
+              <!-- Omie ERP Service -->
+              <div class="service-box service-omie">
+                <div class="service-header">
+                  <div class="service-name">
+                    <span style="color: var(--omie); font-size: 18px;">📊</span> Omie ERP MCP
+                  </div>
+                  <span class="status-pill ${omieStatus.connected ? 'status-connected' : 'status-disconnected'}">
+                    ${omieStatus.connected ? 'Conectado' : 'Desconectado'}
+                  </span>
+                </div>
+                <div class="service-details">
+                  ${omieStatus.connected ? `
+                    Credenciais APP_KEY / APP_SECRET ativas.<br>
+                    25 tools (catálogo completo dos 138 serviços / 500 métodos + 21 atalhos ERP).
+                  ` : 'Nenhuma credencial Omie ERP cadastrada neste tenant.'}
+                </div>
+                <div class="service-actions">
+                  <button class="btn btn-omie btn-sm" onclick="openOmieModal('${tId}')">
+                    ${omieStatus.connected ? '🔄 Trocar Credenciais' : '🔑 Configurar Omie'}
+                  </button>
+                  ${omieStatus.connected ? `
+                    <button class="btn btn-secondary btn-sm" onclick="forceRefreshToken('omie', '${tId}')">⚡ Testar Conexão</button>
+                    <button class="btn btn-secondary btn-sm" onclick="inspectTools('omie', '${tId}')">🛠️ Ver Tools</button>
+                    <button class="btn btn-secondary btn-sm" onclick="showAgentSetup('omie', '${tId}', '${tenant.api_key}')">🤖 Setup Agente</button>
+                    <button class="btn btn-danger-outline btn-sm" onclick="disconnectService('omie', '${tId}')">Desconectar</button>
+                  ` : ''}
+                </div>
+              </div>
             </div>
           </div>
         `;
       }).join('');
+    }
+
+    function openOmieModal(tenant) {
+      document.getElementById('form-omie').reset();
+      document.getElementById('omie-tenant').value = tenant;
+      document.getElementById('omie-modal-title').innerText = `Credenciais Omie ERP (${tenant})`;
+      document.getElementById('modal-omie').style.display = 'flex';
+    }
+
+    async function handleOmieLogin(e) {
+      e.preventDefault();
+      const tenant = document.getElementById('omie-tenant').value;
+      const app_key = document.getElementById('omie-app-key').value.trim();
+      const app_secret = document.getElementById('omie-app-secret').value.trim();
+      try {
+        const resp = await fetch(`/api/tenants/${tenant}/omie/credentials`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ app_key, app_secret })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          showToast(`❌ Falha ao validar Omie: ${escapeHtml(data.detail || JSON.stringify(data))}`, 'error');
+          return;
+        }
+        closeModal('modal-omie');
+        showToast(`🎉 ${data.message || 'Omie conectada!'}`);
+        loadTenantsData();
+      } catch (err) {
+        showToast(`Erro: ${err.message}`, 'error');
+      }
     }
 
     function openSultsModal(tenant) {
