@@ -102,16 +102,20 @@ def resolve_target(
 
 
 class MCPGateway:
-    def __init__(self, storage: StorageManager, session_manager: SessionManager):
+    def __init__(self, storage: StorageManager, session_manager: SessionManager, meta_mcp_server: Optional[Any] = None, yungas_mcp_server: Optional[Any] = None):
         self.storage = storage
         self.sessions = session_manager
+        self.meta_mcp = meta_mcp_server
+        self.yungas_mcp = yungas_mcp_server
 
         self.server = Server(
             "mcp-multi-tenant-bridge",
             version="2.1.0",
-            instructions="Gateway MCP multi-tenant para Lovable e Uscreen.",
+            instructions="Gateway MCP multi-tenant para Lovable, Uscreen e Meta Ads.",
             on_list_tools=self._on_list_tools,
             on_call_tool=self._on_call_tool,
+            on_list_resources=self._on_list_resources,
+            on_read_resource=self._on_read_resource,
         )
 
         self.manager = StreamableHTTPSessionManager(
@@ -136,14 +140,34 @@ class MCPGateway:
         raise RuntimeError("Não foi possível identificar o tenant desta requisição MCP.")
 
     # ---------- Handlers MCP ----------
-    async def _on_list_tools(self, ctx: Any, params: Optional[types.PaginatedRequestParams]) -> types.ListToolsResult:
+    async def _on_list_resources(self, ctx: Any, params: Optional[types.PaginatedRequestParams] = None) -> types.ListResourcesResult:
         service, tenant = self._target_from_ctx(ctx)
+        if service == "meta" and self.meta_mcp:
+            return await self.meta_mcp.list_resources(tenant)
+        return types.ListResourcesResult(resources=[])
+
+    async def _on_read_resource(self, ctx: Any, params: types.ReadResourceRequestParams) -> types.ReadResourceResult:
+        service, tenant = self._target_from_ctx(ctx)
+        if service == "meta" and self.meta_mcp:
+            return await self.meta_mcp.read_resource(tenant, str(params.uri))
+        raise ValueError(f"Recursos não suportados para o serviço '{service}'.")
+
+    async def _on_list_tools(self, ctx: Any, params: Optional[types.PaginatedRequestParams] = None) -> types.ListToolsResult:
+        service, tenant = self._target_from_ctx(ctx)
+        if service == "meta" and self.meta_mcp:
+            return await self.meta_mcp.list_tools(tenant)
+        if service == "yungas" and self.yungas_mcp:
+            return await self.yungas_mcp.list_tools(tenant)
         return await self.sessions.run_with_session(
             service, tenant, lambda s: s.list_tools(params=params), retry_any_error=True
         )
 
     async def _on_call_tool(self, ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
         service, tenant = self._target_from_ctx(ctx)
+        if service == "meta" and self.meta_mcp:
+            return await self.meta_mcp.call_tool(tenant, params.name, params.arguments or {})
+        if service == "yungas" and self.yungas_mcp:
+            return await self.yungas_mcp.call_tool(tenant, params.name, params.arguments or {})
         try:
             return await self.sessions.run_with_session(
                 service, tenant, lambda s: s.call_tool(params.name, params.arguments or {})

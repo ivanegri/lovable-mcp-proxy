@@ -24,6 +24,10 @@ def get_dashboard_html() -> str:
       --lovable-gradient: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
       --uscreen: #06b6d4;
       --uscreen-gradient: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
+      --meta: #0081fb;
+      --meta-gradient: linear-gradient(135deg, #0081fb 0%, #00c6ff 100%);
+      --yungas: #f59e0b;
+      --yungas-gradient: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
       --success: #10b981;
       --warning: #f59e0b;
       --danger: #ef4444;
@@ -158,6 +162,16 @@ def get_dashboard_html() -> str:
     .btn-uscreen:hover {
       transform: translateY(-1px);
       box-shadow: 0 6px 20px rgba(6, 182, 212, 0.5);
+    }
+
+    .btn-meta {
+      background: var(--meta-gradient);
+      color: white;
+      box-shadow: 0 4px 14px rgba(0, 129, 251, 0.35);
+    }
+    .btn-meta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(0, 129, 251, 0.5);
     }
 
     .btn-danger-outline {
@@ -326,6 +340,24 @@ def get_dashboard_html() -> str:
 
     .service-uscreen::before {
       background: var(--uscreen-gradient);
+    }
+
+    .service-meta::before {
+      background: var(--meta-gradient);
+    }
+
+    .service-yungas::before {
+      background: var(--yungas-gradient);
+    }
+
+    .btn-yungas {
+      background: var(--yungas-gradient);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-yungas:hover {
+      filter: brightness(1.1);
     }
 
     .service-header {
@@ -509,7 +541,7 @@ def get_dashboard_html() -> str:
         <div class="logo-badge">⚡</div>
         <div class="brand-title">
           <h1>MCP Multi-Tenant Bridge</h1>
-          <p>Gateway unificado Lovable & Uscreen com isolamento total</p>
+          <p>Gateway unificado Lovable, Uscreen, Meta Ads &amp; Yungas com isolamento total</p>
         </div>
       </div>
       <div class="header-actions">
@@ -538,10 +570,24 @@ def get_dashboard_html() -> str:
         </div>
       </div>
       <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(0, 129, 251, 0.15); color: #0081fb;">📢</div>
+        <div class="stat-meta">
+          <h3 id="stat-meta-connected">0</h3>
+          <p>Contas Meta Ads Ativas</p>
+        </div>
+      </div>
+      <div class="stat-card">
         <div class="stat-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">🛡️</div>
         <div class="stat-meta">
           <h3 id="stat-total-tenants">0</h3>
           <p>Tenants Registrados</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">🏢</div>
+        <div class="stat-meta">
+          <h3 id="stat-yungas-connected">0</h3>
+          <p>Contas Yungas Ativas</p>
         </div>
       </div>
     </div>
@@ -578,6 +624,49 @@ def get_dashboard_html() -> str:
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('modal-new-tenant')">Cancelar</button>
           <button type="submit" class="btn btn-primary">Salvar Tenant</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Login Yungas -->
+  <div id="modal-yungas" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="yungas-modal-title">Login Yungas</h2>
+        <button class="close-btn" onclick="closeModal('modal-yungas')">&times;</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+        Credenciais fornecidas pelo suporte da Yungas (suporte@yungas.com.br). O token é gerado e renovado automaticamente.
+      </p>
+      <form id="form-yungas" onsubmit="handleYungasLogin(event)">
+        <input type="hidden" id="yungas-tenant">
+        <div class="form-group">
+          <label>Client ID</label>
+          <input type="text" id="yungas-client-id" class="form-control" autocomplete="off" required>
+        </div>
+        <div class="form-group">
+          <label>Client Secret</label>
+          <input type="password" id="yungas-client-secret" class="form-control" autocomplete="new-password" required>
+        </div>
+        <div class="form-group">
+          <label>Ambiente</label>
+          <select id="yungas-env" class="form-control">
+            <option value="production">Production (app.yungas.com.br)</option>
+            <option value="staging">Staging (staging.yungas.com.br)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Scopes (opcional - vazio = todos, separados por espaço)</label>
+          <input type="text" id="yungas-scopes" class="form-control" placeholder="ticket.all user.all franchise.all ...">
+        </div>
+        <div class="form-group">
+          <label>PEX API Key (opcional - habilita as tools yungas_pex_*)</label>
+          <input type="password" id="yungas-pex-key" class="form-control" autocomplete="new-password">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-yungas')">Cancelar</button>
+          <button type="submit" class="btn btn-yungas">Entrar / Validar</button>
         </div>
       </form>
     </div>
@@ -709,17 +798,23 @@ def get_dashboard_html() -> str:
 
       let lovableCount = 0;
       let uscreenCount = 0;
+      let metaCount = 0;
+      let yungasCount = 0;
       const tenantKeys = Object.keys(tenants);
 
       tokensStatus.forEach(t => {
         if (t.connected) {
           if (t.service === 'lovable') lovableCount++;
           if (t.service === 'uscreen') uscreenCount++;
+          if (t.service === 'meta') metaCount++;
+          if (t.service === 'yungas') yungasCount++;
         }
       });
 
       document.getElementById('stat-lovable-connected').innerText = lovableCount;
       document.getElementById('stat-uscreen-connected').innerText = uscreenCount;
+      document.getElementById('stat-meta-connected').innerText = metaCount;
+      document.getElementById('stat-yungas-connected').innerText = yungasCount;
       document.getElementById('stat-total-tenants').innerText = tenantKeys.length;
 
       const container = document.getElementById('tenants-list');
@@ -732,6 +827,8 @@ def get_dashboard_html() -> str:
         const tenant = tenants[tId];
         const lovableStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'lovable') || {};
         const uscreenStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'uscreen') || {};
+        const metaStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'meta') || {};
+        const yungasStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'yungas') || {};
 
         return `
           <div class="tenant-card">
@@ -808,10 +905,106 @@ def get_dashboard_html() -> str:
                   ` : ''}
                 </div>
               </div>
+
+              <!-- Meta Ads Service -->
+              <div class="service-box service-meta">
+                <div class="service-header">
+                  <div class="service-name">
+                    <span style="color: var(--meta); font-size: 18px;">📢</span> Meta Ads MCP
+                  </div>
+                  <span class="status-pill ${metaStatus.connected ? 'status-connected' : 'status-disconnected'}">
+                    ${metaStatus.connected ? (metaStatus.is_expired ? 'Token Expirado' : 'Conectado') : 'Desconectado'}
+                  </span>
+                </div>
+                <div class="service-details">
+                  ${metaStatus.connected ? `
+                    Token de Acesso ativo (Long-Lived). Webhooks integrados.<br>
+                    Expira em: <strong>${formatSeconds(metaStatus.expires_in_seconds)}</strong>
+                  ` : 'Nenhuma conta Meta Ads conectada a este tenant.'}
+                </div>
+                <div class="service-actions">
+                  <a href="/oauth/login?service=meta&tenant=${tId}" class="btn btn-meta btn-sm">
+                    ${metaStatus.connected ? '🔄 Reconectar Meta' : '🚀 Conectar Meta Ads'}
+                  </a>
+                  ${metaStatus.connected ? `
+                    <button class="btn btn-secondary btn-sm" onclick="inspectTools('meta', '${tId}')">🛠️ Ver Tools</button>
+                    <button class="btn btn-secondary btn-sm" onclick="showAgentSetup('meta', '${tId}', '${tenant.api_key}')">🤖 Setup Agente</button>
+                    <button class="btn btn-danger-outline btn-sm" onclick="showMetaWebhookInfo('${tId}')">🔗 Webhook URL</button>
+                    <button class="btn btn-danger-outline btn-sm" onclick="disconnectService('meta', '${tId}')">Desconectar</button>
+                  ` : `
+                    <button class="btn btn-secondary btn-sm" onclick="showMetaWebhookInfo('${tId}')">🔗 Webhook URL</button>
+                  `}
+                </div>
+              </div>
+
+              <!-- Yungas Service -->
+              <div class="service-box service-yungas">
+                <div class="service-header">
+                  <div class="service-name">
+                    <span style="color: var(--yungas); font-size: 18px;">🏢</span> Yungas MCP
+                  </div>
+                  <span class="status-pill ${yungasStatus.connected ? 'status-connected' : 'status-disconnected'}">
+                    ${yungasStatus.connected ? 'Conectado' : 'Desconectado'}
+                  </span>
+                </div>
+                <div class="service-details">
+                  ${yungasStatus.connected ? `
+                    Credenciais salvas. Token gerado e <strong>renovado automaticamente</strong> (client_credentials).<br>
+                    APIs: Public v3 + PEX.
+                  ` : 'Nenhuma credencial Yungas cadastrada neste tenant.'}
+                </div>
+                <div class="service-actions">
+                  <button class="btn btn-yungas btn-sm" onclick="openYungasModal('${tId}')">
+                    ${yungasStatus.connected ? '🔄 Trocar credenciais' : '🔐 Login Yungas'}
+                  </button>
+                  ${yungasStatus.connected ? `
+                    <button class="btn btn-secondary btn-sm" onclick="forceRefreshToken('yungas', '${tId}')">⚡ Testar / Renovar Token</button>
+                    <button class="btn btn-secondary btn-sm" onclick="inspectTools('yungas', '${tId}')">🛠️ Ver Tools</button>
+                    <button class="btn btn-secondary btn-sm" onclick="showAgentSetup('yungas', '${tId}', '${tenant.api_key}')">🤖 Setup Agente</button>
+                    <button class="btn btn-danger-outline btn-sm" onclick="disconnectService('yungas', '${tId}')">Desconectar</button>
+                  ` : ''}
+                </div>
+              </div>
             </div>
           </div>
         `;
       }).join('');
+    }
+
+    function openYungasModal(tenant) {
+      document.getElementById('form-yungas').reset();
+      document.getElementById('yungas-tenant').value = tenant;
+      document.getElementById('yungas-modal-title').innerText = `Login Yungas (${tenant})`;
+      document.getElementById('modal-yungas').style.display = 'flex';
+    }
+
+    async function handleYungasLogin(e) {
+      e.preventDefault();
+      const tenant = document.getElementById('yungas-tenant').value;
+      const body = {
+        client_id: document.getElementById('yungas-client-id').value.trim(),
+        client_secret: document.getElementById('yungas-client-secret').value.trim(),
+        env: document.getElementById('yungas-env').value,
+        scopes: document.getElementById('yungas-scopes').value.trim() || null,
+        pex_api_key: document.getElementById('yungas-pex-key').value.trim() || null
+      };
+      try {
+        const resp = await fetch(`/api/tenants/${tenant}/yungas/credentials`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          showToast(`❌ Falha no login Yungas: ${escapeHtml(data.detail || JSON.stringify(data))}`, 'error');
+          return;
+        }
+        closeModal('modal-yungas');
+        showToast(`🎉 Yungas conectada para o tenant "${tenant}".`);
+        loadTenantsData();
+      } catch (err) {
+        showToast(`Erro: ${err.message}`, 'error');
+      }
     }
 
     function openNewTenantModal() {
@@ -969,6 +1162,28 @@ def get_dashboard_html() -> str:
       } catch (err) {
         document.getElementById('tools-modal-content').innerHTML = `<p style="color: var(--danger);">Falha de comunicação: ${err.message}</p>`;
       }
+    }
+
+    function showMetaWebhookInfo(tenant) {
+      const base = window.location.origin;
+      const callbackUrl = `${base}/webhooks/meta`;
+      const tenantCallbackUrl = `${base}/${tenant}/webhooks/meta`;
+      const verifyToken = "meta_mcp_hub_token (ou o valor de META_VERIFY_TOKEN no seu .env)";
+      
+      const infoMsg = `📋 Configuração do Webhook no Meta for Developers:
+
+1. Callback URL:
+${callbackUrl}
+(ou com tenant: ${tenantCallbackUrl})
+
+2. Verify Token:
+${verifyToken}
+
+3. Assinatura de Campos:
+- Objeto 'ad_account': with_issues_ad_objects, in_process_ad_objects, creative_fatigue
+- Objeto 'page': leadgen`;
+
+      alert(infoMsg);
     }
 
     function copyText(str) {

@@ -32,10 +32,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mcp-proxy")
 
+from meta_database import MetaDatabase
+from meta_mcp_server import MetaAdsMCPServer
+from meta_webhook import register_meta_webhook_routes
+from yungas_mcp_server import YungasMCPServer
+from yungas_client import request_token, YungasError, DEFAULT_SCOPES
+
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
 storage = StorageManager(DATA_DIR)
 session_manager = SessionManager(storage)
+
+# Instância do banco SQLite dedicado para eventos e cache da Meta Ads
+meta_db = MetaDatabase(os.path.join(DATA_DIR, "meta_ads.sqlite"))
+meta_mcp_server = MetaAdsMCPServer(storage, meta_db)
+yungas_mcp_server = YungasMCPServer(storage)
+
+mcp_gateway = MCPGateway(storage, session_manager, meta_mcp_server=meta_mcp_server, yungas_mcp_server=yungas_mcp_server)
 
 
 def get_request_base_url(request: Request) -> str:
@@ -52,10 +65,10 @@ def get_request_base_url(request: Request) -> str:
         return f"{proto}://{forwarded_host}"
 
     url = str(request.base_url).rstrip("/")
-    # Se não for localhost e não for https, força https
     if not ("localhost" in url or "127.0.0.1" in url) and url.startswith("http://"):
         url = "https://" + url[7:]
     return url
+
 
 # Armazenamento temporário de estados OAuth pendentes (state -> {service, tenant, ...})
 _pending_oauth: Dict[str, Dict[str, Any]] = {}
@@ -101,10 +114,8 @@ def resolve_auth(
 
     # Resolução do Tenant
     if is_master:
-        # Se for Master Key, permite especificar qualquer tenant via header ou parâmetro
         resolved_tenant = target_tenant or request.headers.get("x-tenant-id") or "default"
     else:
-        # Se for chave específica de um tenant, trava no tenant dono da chave
         resolved_tenant = matched["id"]
         if target_tenant and target_tenant.lower() != resolved_tenant.lower():
             raise HTTPException(
@@ -125,12 +136,9 @@ def resolve_auth(
     return resolved_service, resolved_tenant
 
 
-mcp_gateway = MCPGateway(storage, session_manager)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Iniciando MCP Multi-Tenant Bridge...")
+    logger.info("Iniciando MCP Multi-Tenant Bridge (Lovable, Uscreen & Meta Ads)...")
     session_manager.start_background_task()
     async with mcp_gateway.manager.run():
         logger.info("Endpoint MCP nativo ativo em /mcp, /{service}/mcp e /{service}/{tenant}/mcp")
@@ -140,11 +148,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="MCP Multi-Tenant Bridge (Lovable & Uscreen)",
-    description="Gateway multi-tenant seguro para integração com Lovable e Uscreen via Model Context Protocol (MCP)",
-    version="2.0.0",
+    title="MCP Multi-Tenant Bridge (Lovable, Uscreen & Meta Ads)",
+    description="Gateway multi-tenant seguro para integração com Lovable, Uscreen e Meta Ads via Model Context Protocol (MCP)",
+    version="2.2.0",
     lifespan=lifespan
 )
+
+# Registra endpoints de recepção de Webhooks da Meta Ads
+register_meta_webhook_routes(app, meta_db, storage)
 
 
 # ==========================================
@@ -230,6 +241,42 @@ async def disconnect_service_token(service: str, tenant_id: str, request: Reques
     resolve_auth(request, target_service=service, target_tenant=tenant_id)
     storage.delete_tokens(service, tenant_id)
     return {"status": "ok", "message": f"Conexão com {service.upper()} para '{tenant_id}' removida."}
+
+
+class YungasCredentials(BaseModel):
+    client_id: str
+    client_secret: str
+    scopes: Optional[str] = None
+    env: Optional[str] = "production"
+    pex_api_key: Optional[str] = None
+
+
+@app.post("/api/tenants/{tenant_id}/yungas/credentials")
+async def save_yungas_credentials(tenant_id: str, payload: YungasCredentials, request: Request):
+    """Login Yungas: valida client_id/client_secret (client_credentials) e salva para o tenant."""
+    resolve_auth(request, target_service="yungas", target_tenant=tenant_id)
+    if not storage.get_tenant(tenant_id):
+        storage.create_or_update_tenant(tenant_id, f"Tenant {tenant_id}")
+
+    creds = {
+        "client_id": payload.client_id.strip(),
+        "client_secret": payload.client_secret.strip(),
+        "scopes": (payload.scopes or "").strip() or DEFAULT_SCOPES,
+        "env": (payload.env or "production").lower(),
+        "pex_api_key": (payload.pex_api_key or "").strip(),
+    }
+    try:
+        token = await request_token(creds)
+    except YungasError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contatar a Yungas: {e}")
+
+    creds["access_token"] = token["access_token"]
+    creds["expires_at"] = int(time.time()) + int(token.get("expires_in", 3600))
+    creds["refreshed_at"] = int(time.time())
+    storage.save_tokens("yungas", tenant_id.lower(), creds)
+    return {"status": "ok", "message": f"Yungas conectada para '{tenant_id}'."}
 
 
 # ==========================================
@@ -370,6 +417,13 @@ async def list_tools_scoped(
 ):
     """Lista as ferramentas disponíveis para o serviço e tenant especificados."""
     resolved_service, resolved_tenant = resolve_auth(request, target_service=service, target_tenant=tenant)
+    if resolved_service == "meta":
+        res = await meta_mcp_server.list_tools(resolved_tenant)
+        return {"service": "meta", "tenant": resolved_tenant, "tools": [t.model_dump() for t in res.tools]}
+    if resolved_service == "yungas":
+        res = await yungas_mcp_server.list_tools(resolved_tenant)
+        return {"service": "yungas", "tenant": resolved_tenant, "tools": [t.model_dump() for t in res.tools]}
+
     try:
         response = await session_manager.run_with_session(
             service=resolved_service,
@@ -405,6 +459,13 @@ async def call_tool_scoped(
             detail="O corpo da requisição deve ser um objeto JSON."
         )
 
+    if resolved_service == "meta":
+        res = await meta_mcp_server.call_tool(resolved_tenant, tool_name, arguments)
+        return {"service": "meta", "tenant": resolved_tenant, "result": res.model_dump()}
+    if resolved_service == "yungas":
+        res = await yungas_mcp_server.call_tool(resolved_tenant, tool_name, arguments)
+        return {"service": "yungas", "tenant": resolved_tenant, "result": res.model_dump()}
+
     try:
         result = await session_manager.run_with_session(
             service=resolved_service,
@@ -422,6 +483,15 @@ async def call_tool_scoped(
 async def reconnect_scoped(service: str, tenant: str, request: Request):
     """Força reconexão MCP para um tenant e serviço específicos."""
     resolved_service, resolved_tenant = resolve_auth(request, target_service=service, target_tenant=tenant)
+    if resolved_service == "meta":
+        return {"status": "ok", "message": f"Conexão com Meta Graph API ({resolved_tenant}) verificada!"}
+    if resolved_service == "yungas":
+        try:
+            await yungas_mcp_server.client._ensure_token(resolved_tenant, force=True)
+            return {"status": "ok", "message": f"Token Yungas ({resolved_tenant}) renovado!"}
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
     try:
         await session_manager.connect_session(resolved_service, resolved_tenant, force_refresh=True)
         return {"status": "ok", "message": f"Reconectado ao MCP {resolved_service.upper()} ({resolved_tenant})!"}

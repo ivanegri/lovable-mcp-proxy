@@ -215,3 +215,15 @@ MCP_Lovable/
 - **Proteção contra Cross-Tenant:** Se um agente enviar a `x-api-key` do `tenant_a`, o proxy rejeitará qualquer tentativa de acessar ferramentas do `tenant_b` com HTTP 403 Forbidden.
 - **Master Admin Key:** A `INTERNAL_API_KEY` definida no `.env` possui acesso administrativo a todos os tenants e ao painel web.
 - **Tokens Protegidos:** Todos os arquivos em `data/` são gravados atomicamente e ignorados pelo `.gitignore`.
+
+## Yungas (APIs v3 + PEX em um único MCP)
+
+Serviço `yungas`, acessível em `/yungas/mcp` e `/yungas/{tenant}/mcp` (mesma chave fixa dos demais).
+
+- **Login:** painel → card "Yungas MCP" → *Login Yungas*. Informe `client_id` e `client_secret`
+  (fornecidos por suporte@yungas.com.br), ambiente (production/staging), scopes e, opcionalmente, a API Key do PEX.
+  As credenciais são validadas na hora e o token (client_credentials) é renovado automaticamente.
+- **Fallback via `.env`** (tenant `default`): `YUNGAS_CLIENT_ID`, `YUNGAS_CLIENT_SECRET`, `YUNGAS_SCOPES`, `YUNGAS_ENV`, `YUNGAS_PEX_API_KEY`.
+- **Tools:** uma por endpoint (`yungas_list_tickets`, `yungas_list_franchises`, `yungas_store_list_orders`, `yungas_pex_get_kpis`...)
+  mais `yungas_request` para qualquer endpoint não coberto. Parâmetros: path params diretos, `query` e `body` como objetos.
+- Limite da API: 1000 requisições / 5 min (o cliente faz retry em HTTP 405).

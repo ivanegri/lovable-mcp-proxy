@@ -79,6 +79,31 @@ PROVIDERS: Dict[str, OAuthProvider] = {
         token_auth_method="none",
         resource="https://app.uscreen.tv/mcp",
         default_grant_types=["authorization_code", "refresh_token"]
+    ),
+    "meta": OAuthProvider(
+        service_id="meta",
+        name="Meta Ads",
+        mcp_url="local://meta-ads",
+        registration_endpoint="",
+        authorization_endpoint="https://www.facebook.com/v21.0/dialog/oauth",
+        token_endpoint="https://graph.facebook.com/v21.0/oauth/access_token",
+        scopes=os.getenv("META_OAUTH_SCOPES", "ads_read,ads_management,leads_retrieval,pages_read_engagement,pages_manage_ads,read_insights"),
+        token_auth_method="client_secret_post",
+        resource=None,
+        default_grant_types=["authorization_code"]
+    ),
+    # Yungas: servidor MCP local; login por client_credentials (sem fluxo no navegador)
+    "yungas": OAuthProvider(
+        service_id="yungas",
+        name="Yungas",
+        mcp_url="local://yungas",
+        registration_endpoint="",
+        authorization_endpoint="",
+        token_endpoint="https://app.yungas.com.br/api/v3/public/oauth/token",
+        scopes="",
+        token_auth_method="client_secret_basic",
+        resource=None,
+        default_grant_types=["client_credentials"]
     )
 }
 
@@ -168,6 +193,15 @@ def list_known_clients(provider: OAuthProvider, data_dir: str) -> List[Tuple[str
 
 def get_or_register_client(provider: OAuthProvider, redirect_uri: str, data_dir: str) -> Tuple[str, Optional[str]]:
     """Obtém ou registra cliente OAuth dinamicamente para o provedor e redirect_uri especificados."""
+    if provider.service_id == "meta":
+        app_id = os.getenv("META_APP_ID", "").strip()
+        app_secret = os.getenv("META_APP_SECRET", "").strip()
+        if not app_id:
+            raise RuntimeError(
+                "META_APP_ID não configurado. Defina META_APP_ID e META_APP_SECRET no arquivo .env."
+            )
+        return app_id, (app_secret or None)
+
     # CIMD: domínio público + provedor que suporta -> sem registro, client_id é a URL do documento
     if provider.supports_cimd and not is_loopback_uri(redirect_uri):
         if not redirect_uri.startswith("https://"):
@@ -302,8 +336,10 @@ def exchange_code_for_tokens(
     }
 
     if client_secret:
-        creds = f"{client_id}:{client_secret}".encode("utf-8")
-        headers["Authorization"] = "Basic " + base64.b64encode(creds).decode("utf-8")
+        post_data["client_secret"] = client_secret
+        if provider.token_auth_method == "client_secret_basic":
+            creds = f"{client_id}:{client_secret}".encode("utf-8")
+            headers["Authorization"] = "Basic " + base64.b64encode(creds).decode("utf-8")
     else:
         # Clientes públicos (como Uscreen com método none) passam client_id no body
         if "client_id" not in post_data:
@@ -322,6 +358,27 @@ def exchange_code_for_tokens(
         except Exception:
             pass
         raise RuntimeError(f"Erro na troca de código no {provider.name} ({he.code}): {body}")
+
+    # No caso da Meta, o token inicial é de curta duração (~2h). Trocamos pelo Long-Lived Token (~60 dias)
+    if provider.service_id == "meta" and tokens.get("access_token") and client_secret:
+        try:
+            ll_params = {
+                "grant_type": "fb_exchange_token",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "fb_exchange_token": tokens["access_token"]
+            }
+            ll_url = f"{provider.token_endpoint}?{urllib.parse.urlencode(ll_params)}"
+            ll_req = urllib.request.Request(ll_url, headers={"User-Agent": "MCP-Proxy-Hub"})
+            with urllib.request.urlopen(ll_req, timeout=15) as ll_resp:
+                ll_tokens = json.load(ll_resp)
+                if ll_tokens.get("access_token"):
+                    tokens["access_token"] = ll_tokens["access_token"]
+                    if ll_tokens.get("expires_in"):
+                        tokens["expires_in"] = ll_tokens["expires_in"]
+                    logger.info("✅ Token da Meta estendido com sucesso para Long-Lived Token (60 dias)!")
+        except Exception as lle:
+            logger.warning(f"Não foi possível estender para token de longa duração da Meta: {lle}")
 
     return tokens
 

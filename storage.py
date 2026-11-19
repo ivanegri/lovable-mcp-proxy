@@ -114,6 +114,7 @@ class StorageManager:
             # Remove arquivos de token associados
             self.delete_tokens("lovable", tenant_id)
             self.delete_tokens("uscreen", tenant_id)
+            self.delete_tokens("yungas", tenant_id)
             return True
         return False
 
@@ -180,12 +181,15 @@ class StorageManager:
         """Lista o status de tokens de todos os pares (serviço, tenant) existentes."""
         records = []
         tenants = self.get_all_tenants()
-        services = ["lovable", "uscreen"]
+        services = ["lovable", "uscreen", "yungas"]
 
         for t_id, t_info in tenants.items():
             for s in services:
                 tokens = self.load_tokens(s, t_id)
-                has_tokens = tokens is not None and bool(tokens.get("access_token") or tokens.get("token"))
+                has_tokens = tokens is not None and bool(
+                    tokens.get("access_token") or tokens.get("token") or
+                    (s == "yungas" and tokens.get("client_id") and tokens.get("client_secret"))
+                )
                 expires_at = tokens.get("expires_at") if tokens else None
                 expires_in = int(expires_at - time.time()) if expires_at else None
                 has_refresh = bool(tokens.get("refresh_token")) if tokens else False
