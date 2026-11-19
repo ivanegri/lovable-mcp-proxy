@@ -135,6 +135,12 @@ class SessionManager:
     async def _connect_locked(self, info: TenantSessionInfo, force_refresh: bool = False) -> ClientSession:
         service = info.service
         tenant_id = info.tenant_id
+        if service == "meta":
+            # Meta Ads roda localmente via MetaAdsMCPServer e Graph API, sem stream upstream
+            info.last_connected_at = time.time()
+            info.last_error = None
+            return None
+
         provider = get_provider(service)
 
         tokens = self.storage.load_tokens(service, tenant_id)

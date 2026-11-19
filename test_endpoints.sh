@@ -27,7 +27,17 @@ echo "----------------------------------------------------------"
 curl -s -X GET "${BASE_URL}/uscreen/default/tools" \
   -H "x-api-key: ${API_KEY}" | (which jq >/dev/null && jq . || cat)
 
-echo -e "\n\n5. Verificando Painel Visual Web (/)"
+echo -e "\n\n5. Consultando Ferramentas do Meta Ads (/meta/default/tools)"
+echo "----------------------------------------------------------"
+curl -s -X GET "${BASE_URL}/meta/default/tools" \
+  -H "x-api-key: ${API_KEY}" | (which jq >/dev/null && jq . || cat)
+
+echo -e "\n\n6. Testando Handshake do Webhook da Meta (/webhooks/meta)"
+echo "----------------------------------------------------------"
+curl -s -X GET "${BASE_URL}/webhooks/meta?hub.mode=subscribe&hub.challenge=teste_desafio_123&hub.verify_token=meta_mcp_hub_token"
+echo ""
+
+echo -e "\n\n7. Verificando Painel Visual Web (/)"
 echo "----------------------------------------------------------"
 STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/")
 echo "HTTP Status do Dashboard: ${STATUS_CODE} (Acesse ${BASE_URL} no navegador para autenticar)"

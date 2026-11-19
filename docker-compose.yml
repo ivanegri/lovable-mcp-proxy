@@ -13,6 +13,10 @@ services:
       - LOVABLE_MCP_URL=${LOVABLE_MCP_URL:-https://mcp.lovable.dev}
       - USCREEN_MCP_URL=${USCREEN_MCP_URL:-https://app.uscreen.tv/mcp}
       - PUBLIC_URL=${PUBLIC_URL:-}
+      - META_APP_ID=${META_APP_ID:-}
+      - META_APP_SECRET=${META_APP_SECRET:-}
+      - META_VERIFY_TOKEN=${META_VERIFY_TOKEN:-meta_mcp_hub_token}
+      - META_AGENT_TRIGGER_URL=${META_AGENT_TRIGGER_URL:-}
     volumes:
       - ./data:/app/data
     healthcheck:
