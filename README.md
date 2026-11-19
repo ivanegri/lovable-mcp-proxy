@@ -227,3 +227,15 @@ Serviço `yungas`, acessível em `/yungas/mcp` e `/yungas/{tenant}/mcp` (mesma c
 - **Tools:** uma por endpoint (`yungas_list_tickets`, `yungas_list_franchises`, `yungas_store_list_orders`, `yungas_pex_get_kpis`...)
   mais `yungas_request` para qualquer endpoint não coberto. Parâmetros: path params diretos, `query` e `body` como objetos.
 - Limite da API: 1000 requisições / 5 min (o cliente faz retry em HTTP 405).
+
+## Sults (API v1 + API v2 em um único MCP)
+
+Serviço `sults`, acessível em `/sults/mcp` e `/sults/{tenant}/mcp` (mesma chave fixa dos demais).
+
+- **Credenciais:** painel → card "Sults MCP" → *Configurar Sults*. Informe o Token v1 e/ou o Token v2
+  (gerados em *Segurança > API > Gestão de Tokens* na Sults; os dois tokens são independentes).
+  Cada token informado é validado contra a API antes de ser salvo.
+- **Fallback via `.env`** (tenant `default`): `SULTS_TOKEN_V1`, `SULTS_TOKEN_V2`.
+- **Tools:** 88 tools geradas automaticamente a partir das specs OpenAPI em `sults_specs/` (27 `sults_v1_*` + 61 `sults_v2_*`),
+  incluindo upload multipart (`sults_v2_enviarArquivoV2` com `file_base64` e `filename`), mais a tool genérica `sults_request`.
+- **Limite da API:** 2 requisições por segundo por IP (compartilhado entre todos os tenants via limitador global de 0,5 s + backoff exponencial em 429/5xx).

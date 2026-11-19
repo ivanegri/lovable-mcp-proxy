@@ -37,6 +37,8 @@ from meta_mcp_server import MetaAdsMCPServer
 from meta_webhook import register_meta_webhook_routes
 from yungas_mcp_server import YungasMCPServer
 from yungas_client import request_token, YungasError, DEFAULT_SCOPES
+from sults_mcp_server import SultsMCPServer
+from sults_client import validate_token as validate_sults_token, SultsError
 
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
@@ -47,8 +49,15 @@ session_manager = SessionManager(storage)
 meta_db = MetaDatabase(os.path.join(DATA_DIR, "meta_ads.sqlite"))
 meta_mcp_server = MetaAdsMCPServer(storage, meta_db)
 yungas_mcp_server = YungasMCPServer(storage)
+sults_mcp_server = SultsMCPServer(storage)
 
-mcp_gateway = MCPGateway(storage, session_manager, meta_mcp_server=meta_mcp_server, yungas_mcp_server=yungas_mcp_server)
+mcp_gateway = MCPGateway(
+    storage,
+    session_manager,
+    meta_mcp_server=meta_mcp_server,
+    yungas_mcp_server=yungas_mcp_server,
+    sults_mcp_server=sults_mcp_server,
+)
 
 
 def get_request_base_url(request: Request) -> str:
@@ -279,6 +288,49 @@ async def save_yungas_credentials(tenant_id: str, payload: YungasCredentials, re
     return {"status": "ok", "message": f"Yungas conectada para '{tenant_id}'."}
 
 
+class SultsCredentials(BaseModel):
+    token_v1: Optional[str] = None
+    token_v2: Optional[str] = None
+
+
+@app.post("/api/tenants/{tenant_id}/sults/credentials")
+async def save_sults_credentials(tenant_id: str, payload: SultsCredentials, request: Request):
+    """Credenciais Sults: valida token_v1 e/ou token_v2 e salva para o tenant."""
+    resolve_auth(request, target_service="sults", target_tenant=tenant_id)
+    if not storage.get_tenant(tenant_id):
+        storage.create_or_update_tenant(tenant_id, f"Tenant {tenant_id}")
+
+    token_v1 = (payload.token_v1 or "").strip()
+    token_v2 = (payload.token_v2 or "").strip()
+    if not token_v1 and not token_v2:
+        raise HTTPException(status_code=400, detail="Informe ao menos um token (Token v1 e/ou Token v2).")
+
+    validated_versions = []
+    try:
+        if token_v1:
+            await validate_sults_token("v1", token_v1)
+            validated_versions.append("v1")
+        if token_v2:
+            await validate_sults_token("v2", token_v2)
+            validated_versions.append("v2")
+    except SultsError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao contatar a Sults: {e}")
+
+    creds = {
+        "token_v1": token_v1,
+        "token_v2": token_v2,
+        "updated_at": int(time.time()),
+    }
+    storage.save_tokens("sults", tenant_id.lower(), creds)
+    return {
+        "status": "ok",
+        "versions": validated_versions,
+        "message": f"Sults conectada para '{tenant_id}' ({', '.join(validated_versions)}).",
+    }
+
+
 # ==========================================
 # 3. Fluxo OAuth 2.1 no Navegador (1-Click)
 # ==========================================
@@ -423,6 +475,9 @@ async def list_tools_scoped(
     if resolved_service == "yungas":
         res = await yungas_mcp_server.list_tools(resolved_tenant)
         return {"service": "yungas", "tenant": resolved_tenant, "tools": [t.model_dump() for t in res.tools]}
+    if resolved_service == "sults":
+        res = await sults_mcp_server.list_tools(resolved_tenant)
+        return {"service": "sults", "tenant": resolved_tenant, "tools": [t.model_dump() for t in res.tools]}
 
     try:
         response = await session_manager.run_with_session(
@@ -465,6 +520,9 @@ async def call_tool_scoped(
     if resolved_service == "yungas":
         res = await yungas_mcp_server.call_tool(resolved_tenant, tool_name, arguments)
         return {"service": "yungas", "tenant": resolved_tenant, "result": res.model_dump()}
+    if resolved_service == "sults":
+        res = await sults_mcp_server.call_tool(resolved_tenant, tool_name, arguments)
+        return {"service": "sults", "tenant": resolved_tenant, "result": res.model_dump()}
 
     try:
         result = await session_manager.run_with_session(
@@ -489,6 +547,21 @@ async def reconnect_scoped(service: str, tenant: str, request: Request):
         try:
             await yungas_mcp_server.client._ensure_token(resolved_tenant, force=True)
             return {"status": "ok", "message": f"Token Yungas ({resolved_tenant}) renovado!"}
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+    if resolved_service == "sults":
+        try:
+            creds = sults_mcp_server.client.load_credentials(resolved_tenant)
+            checked = []
+            if creds.get("token_v1"):
+                await validate_sults_token("v1", creds["token_v1"])
+                checked.append("v1")
+            if creds.get("token_v2"):
+                await validate_sults_token("v2", creds["token_v2"])
+                checked.append("v2")
+            if not checked:
+                raise SultsError(f"Nenhum token Sults configurado para '{resolved_tenant}'.")
+            return {"status": "ok", "message": f"Tokens Sults ({resolved_tenant}: {', '.join(checked)}) validados!"}
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 

@@ -22,6 +22,8 @@ services:
       - YUNGAS_SCOPES=${YUNGAS_SCOPES:-}
       - YUNGAS_ENV=${YUNGAS_ENV:-production}
       - YUNGAS_PEX_API_KEY=${YUNGAS_PEX_API_KEY:-}
+      - SULTS_TOKEN_V1=${SULTS_TOKEN_V1:-}
+      - SULTS_TOKEN_V2=${SULTS_TOKEN_V2:-}
     volumes:
       - ./data:/app/data
     healthcheck:

@@ -115,6 +115,7 @@ class StorageManager:
             self.delete_tokens("lovable", tenant_id)
             self.delete_tokens("uscreen", tenant_id)
             self.delete_tokens("yungas", tenant_id)
+            self.delete_tokens("sults", tenant_id)
             return True
         return False
 
@@ -181,20 +182,29 @@ class StorageManager:
         """Lista o status de tokens de todos os pares (serviço, tenant) existentes."""
         records = []
         tenants = self.get_all_tenants()
-        services = ["lovable", "uscreen", "yungas"]
+        services = ["lovable", "uscreen", "yungas", "sults"]
 
         for t_id, t_info in tenants.items():
             for s in services:
                 tokens = self.load_tokens(s, t_id)
-                has_tokens = tokens is not None and bool(
-                    tokens.get("access_token") or tokens.get("token") or
-                    (s == "yungas" and tokens.get("client_id") and tokens.get("client_secret"))
+                has_v1 = bool(tokens.get("token_v1")) if (s == "sults" and tokens) else False
+                has_v2 = bool(tokens.get("token_v2")) if (s == "sults" and tokens) else False
+                if s == "sults" and t_id == "default":
+                    has_v1 = has_v1 or bool(os.getenv("SULTS_TOKEN_V1", "").strip())
+                    has_v2 = has_v2 or bool(os.getenv("SULTS_TOKEN_V2", "").strip())
+                has_tokens = (
+                    (has_v1 or has_v2) if s == "sults" else (
+                        tokens is not None and bool(
+                            tokens.get("access_token") or tokens.get("token") or
+                            (s == "yungas" and tokens.get("client_id") and tokens.get("client_secret"))
+                        )
+                    )
                 )
                 expires_at = tokens.get("expires_at") if tokens else None
                 expires_in = int(expires_at - time.time()) if expires_at else None
                 has_refresh = bool(tokens.get("refresh_token")) if tokens else False
 
-                records.append({
+                rec: Dict[str, Any] = {
                     "service": s,
                     "tenant_id": t_id,
                     "tenant_name": t_info.get("name", t_id),
@@ -203,5 +213,9 @@ class StorageManager:
                     "expires_at": expires_at,
                     "expires_in_seconds": expires_in,
                     "is_expired": (expires_in is not None and expires_in <= 0) if has_tokens else None
-                })
+                }
+                if s == "sults":
+                    rec["has_v1"] = has_v1
+                    rec["has_v2"] = has_v2
+                records.append(rec)
         return records

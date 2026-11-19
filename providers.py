@@ -104,6 +104,19 @@ PROVIDERS: Dict[str, OAuthProvider] = {
         token_auth_method="client_secret_basic",
         resource=None,
         default_grant_types=["client_credentials"]
+    ),
+    # Sults: servidor MCP local; autenticação por tokens estáticos v1 e/ou v2
+    "sults": OAuthProvider(
+        service_id="sults",
+        name="Sults",
+        mcp_url="local://sults",
+        registration_endpoint="",
+        authorization_endpoint="",
+        token_endpoint="",
+        scopes="",
+        token_auth_method="none",
+        resource=None,
+        default_grant_types=[]
     )
 }
 

@@ -28,6 +28,8 @@ def get_dashboard_html() -> str:
       --meta-gradient: linear-gradient(135deg, #0081fb 0%, #00c6ff 100%);
       --yungas: #f59e0b;
       --yungas-gradient: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+      --sults: #06b6d4;
+      --sults-gradient: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
       --success: #10b981;
       --warning: #f59e0b;
       --danger: #ef4444;
@@ -360,6 +362,20 @@ def get_dashboard_html() -> str:
       filter: brightness(1.1);
     }
 
+    .service-sults::before {
+      background: var(--sults-gradient);
+    }
+
+    .btn-sults {
+      background: var(--sults-gradient);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-sults:hover {
+      filter: brightness(1.1);
+    }
+
     .service-header {
       display: flex;
       justify-content: space-between;
@@ -541,7 +557,7 @@ def get_dashboard_html() -> str:
         <div class="logo-badge">⚡</div>
         <div class="brand-title">
           <h1>MCP Multi-Tenant Bridge</h1>
-          <p>Gateway unificado Lovable, Uscreen, Meta Ads &amp; Yungas com isolamento total</p>
+          <p>Gateway unificado Lovable, Uscreen, Meta Ads, Yungas &amp; Sults com isolamento total</p>
         </div>
       </div>
       <div class="header-actions">
@@ -588,6 +604,13 @@ def get_dashboard_html() -> str:
         <div class="stat-meta">
           <h3 id="stat-yungas-connected">0</h3>
           <p>Contas Yungas Ativas</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(6, 182, 212, 0.15); color: #06b6d4;">🧩</div>
+        <div class="stat-meta">
+          <h3 id="stat-sults-connected">0</h3>
+          <p>Contas Sults Ativas</p>
         </div>
       </div>
     </div>
@@ -667,6 +690,34 @@ def get_dashboard_html() -> str:
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('modal-yungas')">Cancelar</button>
           <button type="submit" class="btn btn-yungas">Entrar / Validar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Credenciais Sults -->
+  <div id="modal-sults" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="sults-modal-title">Credenciais Sults</h2>
+        <button class="close-btn" onclick="closeModal('modal-sults')">&times;</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+        Tokens gerados em <strong>Segurança &gt; API &gt; Gestão de Tokens</strong> na Sults. Informe ao menos um dos dois tokens (v1 e v2 são independentes).
+      </p>
+      <form id="form-sults" onsubmit="handleSultsLogin(event)">
+        <input type="hidden" id="sults-tenant">
+        <div class="form-group">
+          <label>Token API v1 (opcional - habilita as 27 tools sults_v1_*)</label>
+          <input type="password" id="sults-token-v1" class="form-control" autocomplete="new-password" placeholder="Token estático da API v1">
+        </div>
+        <div class="form-group">
+          <label>Token API v2 (opcional - habilita as 61 tools sults_v2_*)</label>
+          <input type="password" id="sults-token-v2" class="form-control" autocomplete="new-password" placeholder="Token estático da API v2">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-sults')">Cancelar</button>
+          <button type="submit" class="btn btn-sults">Validar &amp; Salvar</button>
         </div>
       </form>
     </div>
@@ -800,6 +851,7 @@ def get_dashboard_html() -> str:
       let uscreenCount = 0;
       let metaCount = 0;
       let yungasCount = 0;
+      let sultsCount = 0;
       const tenantKeys = Object.keys(tenants);
 
       tokensStatus.forEach(t => {
@@ -808,6 +860,7 @@ def get_dashboard_html() -> str:
           if (t.service === 'uscreen') uscreenCount++;
           if (t.service === 'meta') metaCount++;
           if (t.service === 'yungas') yungasCount++;
+          if (t.service === 'sults') sultsCount++;
         }
       });
 
@@ -815,6 +868,7 @@ def get_dashboard_html() -> str:
       document.getElementById('stat-uscreen-connected').innerText = uscreenCount;
       document.getElementById('stat-meta-connected').innerText = metaCount;
       document.getElementById('stat-yungas-connected').innerText = yungasCount;
+      document.getElementById('stat-sults-connected').innerText = sultsCount;
       document.getElementById('stat-total-tenants').innerText = tenantKeys.length;
 
       const container = document.getElementById('tenants-list');
@@ -829,6 +883,8 @@ def get_dashboard_html() -> str:
         const uscreenStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'uscreen') || {};
         const metaStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'meta') || {};
         const yungasStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'yungas') || {};
+        const sultsStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'sults') || {};
+        const sultsVersions = [sultsStatus.has_v1 ? 'v1' : null, sultsStatus.has_v2 ? 'v2' : null].filter(Boolean);
 
         return `
           <div class="tenant-card">
@@ -965,10 +1021,74 @@ def get_dashboard_html() -> str:
                   ` : ''}
                 </div>
               </div>
+
+              <!-- Sults Service -->
+              <div class="service-box service-sults">
+                <div class="service-header">
+                  <div class="service-name">
+                    <span style="color: var(--sults); font-size: 18px;">🧩</span> Sults MCP
+                  </div>
+                  <span class="status-pill ${sultsStatus.connected ? 'status-connected' : 'status-disconnected'}">
+                    ${sultsStatus.connected ? 'Conectado' : 'Desconectado'}
+                  </span>
+                </div>
+                <div class="service-details">
+                  ${sultsStatus.connected ? `
+                    Versões ativas: <strong>${sultsVersions.join(' + ')}</strong>.<br>
+                    88 tools (27 v1 + 61 v2) + sults_request. Limitador global: 2 req/s.
+                  ` : 'Nenhum token Sults cadastrado neste tenant.'}
+                </div>
+                <div class="service-actions">
+                  <button class="btn btn-sults btn-sm" onclick="openSultsModal('${tId}')">
+                    ${sultsStatus.connected ? '🔄 Atualizar Tokens' : '🔑 Configurar Sults'}
+                  </button>
+                  ${sultsStatus.connected ? `
+                    <button class="btn btn-secondary btn-sm" onclick="forceRefreshToken('sults', '${tId}')">⚡ Testar Tokens</button>
+                    <button class="btn btn-secondary btn-sm" onclick="inspectTools('sults', '${tId}')">🛠️ Ver Tools</button>
+                    <button class="btn btn-secondary btn-sm" onclick="showAgentSetup('sults', '${tId}', '${tenant.api_key}')">🤖 Setup Agente</button>
+                    <button class="btn btn-danger-outline btn-sm" onclick="disconnectService('sults', '${tId}')">Desconectar</button>
+                  ` : ''}
+                </div>
+              </div>
             </div>
           </div>
         `;
       }).join('');
+    }
+
+    function openSultsModal(tenant) {
+      document.getElementById('form-sults').reset();
+      document.getElementById('sults-tenant').value = tenant;
+      document.getElementById('sults-modal-title').innerText = `Credenciais Sults (${tenant})`;
+      document.getElementById('modal-sults').style.display = 'flex';
+    }
+
+    async function handleSultsLogin(e) {
+      e.preventDefault();
+      const tenant = document.getElementById('sults-tenant').value;
+      const token_v1 = document.getElementById('sults-token-v1').value.trim();
+      const token_v2 = document.getElementById('sults-token-v2').value.trim();
+      if (!token_v1 && !token_v2) {
+        showToast('❌ Informe ao menos um token (Token v1 e/ou Token v2).', 'error');
+        return;
+      }
+      try {
+        const resp = await fetch(`/api/tenants/${tenant}/sults/credentials`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ token_v1: token_v1 || null, token_v2: token_v2 || null })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          showToast(`❌ Falha ao validar Sults: ${escapeHtml(data.detail || JSON.stringify(data))}`, 'error');
+          return;
+        }
+        closeModal('modal-sults');
+        showToast(`🎉 ${data.message || 'Sults conectada!'}`);
+        loadTenantsData();
+      } catch (err) {
+        showToast(`Erro: ${err.message}`, 'error');
+      }
     }
 
     function openYungasModal(tenant) {
