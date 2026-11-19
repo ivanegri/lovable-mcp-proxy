@@ -17,6 +17,11 @@ services:
       - META_APP_SECRET=${META_APP_SECRET:-}
       - META_VERIFY_TOKEN=${META_VERIFY_TOKEN:-meta_mcp_hub_token}
       - META_AGENT_TRIGGER_URL=${META_AGENT_TRIGGER_URL:-}
+      - YUNGAS_CLIENT_ID=${YUNGAS_CLIENT_ID:-}
+      - YUNGAS_CLIENT_SECRET=${YUNGAS_CLIENT_SECRET:-}
+      - YUNGAS_SCOPES=${YUNGAS_SCOPES:-}
+      - YUNGAS_ENV=${YUNGAS_ENV:-production}
+      - YUNGAS_PEX_API_KEY=${YUNGAS_PEX_API_KEY:-}
     volumes:
       - ./data:/app/data
     healthcheck:
