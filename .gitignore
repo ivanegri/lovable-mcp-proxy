@@ -2,6 +2,7 @@
 .env
 data/tokens.json
 data/*.json
+data/*.sqlite*
 data/tokens/
 data/clients/
 !data/tokens.json.example
@@ -20,3 +21,4 @@ venv/
 *.log
 .vscode/
 .idea/
+Sults Implementation.md

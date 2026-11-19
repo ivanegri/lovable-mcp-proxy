@@ -318,16 +318,20 @@ async def save_sults_credentials(tenant_id: str, payload: SultsCredentials, requ
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Erro ao contatar a Sults: {e}")
 
+    existing = dict(storage.load_tokens("sults", tenant_id.lower()) or {})
+    final_v1 = token_v1 or existing.get("token_v1", "")
+    final_v2 = token_v2 or existing.get("token_v2", "")
     creds = {
-        "token_v1": token_v1,
-        "token_v2": token_v2,
+        "token_v1": final_v1,
+        "token_v2": final_v2,
         "updated_at": int(time.time()),
     }
     storage.save_tokens("sults", tenant_id.lower(), creds)
+    active_versions = [v for v, tok in (("v1", final_v1), ("v2", final_v2)) if tok]
     return {
         "status": "ok",
-        "versions": validated_versions,
-        "message": f"Sults conectada para '{tenant_id}' ({', '.join(validated_versions)}).",
+        "versions": active_versions,
+        "message": f"Sults conectada para '{tenant_id}' ({', '.join(active_versions)}).",
     }
 
 

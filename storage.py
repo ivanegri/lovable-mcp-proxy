@@ -114,6 +114,7 @@ class StorageManager:
             # Remove arquivos de token associados
             self.delete_tokens("lovable", tenant_id)
             self.delete_tokens("uscreen", tenant_id)
+            self.delete_tokens("meta", tenant_id)
             self.delete_tokens("yungas", tenant_id)
             self.delete_tokens("sults", tenant_id)
             return True
@@ -182,7 +183,7 @@ class StorageManager:
         """Lista o status de tokens de todos os pares (serviço, tenant) existentes."""
         records = []
         tenants = self.get_all_tenants()
-        services = ["lovable", "uscreen", "yungas", "sults"]
+        services = ["lovable", "uscreen", "meta", "yungas", "sults"]
 
         for t_id, t_info in tenants.items():
             for s in services:
@@ -192,11 +193,18 @@ class StorageManager:
                 if s == "sults" and t_id == "default":
                     has_v1 = has_v1 or bool(os.getenv("SULTS_TOKEN_V1", "").strip())
                     has_v2 = has_v2 or bool(os.getenv("SULTS_TOKEN_V2", "").strip())
+                has_yungas_env = bool(
+                    s == "yungas" and t_id == "default"
+                    and os.getenv("YUNGAS_CLIENT_ID", "").strip()
+                    and os.getenv("YUNGAS_CLIENT_SECRET", "").strip()
+                )
                 has_tokens = (
                     (has_v1 or has_v2) if s == "sults" else (
-                        tokens is not None and bool(
-                            tokens.get("access_token") or tokens.get("token") or
-                            (s == "yungas" and tokens.get("client_id") and tokens.get("client_secret"))
+                        has_yungas_env or (
+                            tokens is not None and bool(
+                                tokens.get("access_token") or tokens.get("token") or
+                                (s == "yungas" and tokens.get("client_id") and tokens.get("client_secret"))
+                            )
                         )
                     )
                 )
