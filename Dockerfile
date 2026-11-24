@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia código da aplicação
-COPY providers.py storage.py session_manager.py dashboard.py mcp_gateway.py meta_database.py meta_client.py meta_mcp_server.py meta_webhook.py yungas_client.py yungas_mcp_server.py sults_client.py sults_mcp_server.py omie_client.py omie_mcp_server.py proxy.py ./
+COPY providers.py storage.py session_manager.py dashboard.py mcp_gateway.py meta_database.py meta_client.py meta_mcp_server.py meta_webhook.py yungas_client.py yungas_mcp_server.py sults_client.py sults_mcp_server.py omie_client.py omie_mcp_server.py rdstation_client.py rdstation_mcp_server.py proxy.py ./
 COPY sults_specs/ ./sults_specs/
 COPY omie_specs/ ./omie_specs/
 

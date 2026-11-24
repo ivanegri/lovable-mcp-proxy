@@ -102,18 +102,19 @@ def resolve_target(
 
 
 class MCPGateway:
-    def __init__(self, storage: StorageManager, session_manager: SessionManager, meta_mcp_server: Optional[Any] = None, yungas_mcp_server: Optional[Any] = None, sults_mcp_server: Optional[Any] = None, omie_mcp_server: Optional[Any] = None):
+    def __init__(self, storage: StorageManager, session_manager: SessionManager, meta_mcp_server: Optional[Any] = None, yungas_mcp_server: Optional[Any] = None, sults_mcp_server: Optional[Any] = None, omie_mcp_server: Optional[Any] = None, rdstation_mcp_server: Optional[Any] = None):
         self.storage = storage
         self.sessions = session_manager
         self.meta_mcp = meta_mcp_server
         self.yungas_mcp = yungas_mcp_server
         self.sults_mcp = sults_mcp_server
         self.omie_mcp = omie_mcp_server
+        self.rdstation_mcp = rdstation_mcp_server
 
         self.server = Server(
             "mcp-multi-tenant-bridge",
-            version="2.3.0",
-            instructions="Gateway MCP multi-tenant para Lovable, Uscreen, Meta Ads, Yungas, Sults e Omie ERP.",
+            version="2.4.0",
+            instructions="Gateway MCP multi-tenant para Lovable, Uscreen, Meta Ads, Yungas, Sults, Omie ERP e RD Station.",
             on_list_tools=self._on_list_tools,
             on_call_tool=self._on_call_tool,
             on_list_resources=self._on_list_resources,
@@ -164,6 +165,8 @@ class MCPGateway:
             return await self.sults_mcp.list_tools(tenant)
         if service == "omie" and self.omie_mcp:
             return await self.omie_mcp.list_tools(tenant)
+        if service == "rdstation" and self.rdstation_mcp:
+            return await self.rdstation_mcp.list_tools(tenant)
         return await self.sessions.run_with_session(
             service, tenant, lambda s: s.list_tools(params=params), retry_any_error=True
         )
@@ -178,6 +181,8 @@ class MCPGateway:
             return await self.sults_mcp.call_tool(tenant, params.name, params.arguments or {})
         if service == "omie" and self.omie_mcp:
             return await self.omie_mcp.call_tool(tenant, params.name, params.arguments or {})
+        if service == "rdstation" and self.rdstation_mcp:
+            return await self.rdstation_mcp.call_tool(tenant, params.name, params.arguments or {})
         try:
             return await self.sessions.run_with_session(
                 service, tenant, lambda s: s.call_tool(params.name, params.arguments or {})

@@ -32,6 +32,8 @@ def get_dashboard_html() -> str:
       --sults-gradient: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
       --omie: #10b981;
       --omie-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      --rdstation: #00b8d9;
+      --rdstation-gradient: linear-gradient(135deg, #00b8d9 0%, #2563eb 100%);
       --success: #10b981;
       --warning: #f59e0b;
       --danger: #ef4444;
@@ -392,6 +394,20 @@ def get_dashboard_html() -> str:
       filter: brightness(1.1);
     }
 
+    .service-rdstation::before {
+      background: var(--rdstation-gradient);
+    }
+
+    .btn-rdstation {
+      background: var(--rdstation-gradient);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-rdstation:hover {
+      filter: brightness(1.1);
+    }
+
     .service-header {
       display: flex;
       justify-content: space-between;
@@ -573,7 +589,7 @@ def get_dashboard_html() -> str:
         <div class="logo-badge">⚡</div>
         <div class="brand-title">
           <h1>MCP Multi-Tenant Bridge</h1>
-          <p>Gateway unificado Lovable, Uscreen, Meta Ads, Yungas, Sults &amp; Omie ERP com isolamento total</p>
+          <p>Gateway unificado Lovable, Uscreen, Meta Ads, Yungas, Sults, Omie ERP &amp; RD Station com isolamento total</p>
         </div>
       </div>
       <div class="header-actions">
@@ -635,6 +651,13 @@ def get_dashboard_html() -> str:
         <div class="stat-meta">
           <h3 id="stat-omie-connected">0</h3>
           <p>Contas Omie Ativas</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(0, 184, 217, 0.15); color: #00b8d9;">🚀</div>
+        <div class="stat-meta">
+          <h3 id="stat-rdstation-connected">0</h3>
+          <p>Contas RD Station Ativas</p>
         </div>
       </div>
     </div>
@@ -775,6 +798,44 @@ def get_dashboard_html() -> str:
     </div>
   </div>
 
+  <!-- Modal: Credenciais RD Station -->
+  <div id="modal-rdstation" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="rdstation-modal-title">Configurar App RD Station</h2>
+        <button class="close-btn" onclick="closeModal('modal-rdstation')">&times;</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+        Informe <strong>Client ID</strong> e <strong>Client Secret</strong> do aplicativo na RD Station App Store (ou deixe em branco se já estiverem no <code>.env</code>).<br>
+        URL de Callback deste tenant: <code id="rdstation-callback-url" style="color: #7dd3fc;"></code>
+        <button type="button" class="copy-snippet-btn" style="margin-left: 6px;" onclick="copyText(document.getElementById('rdstation-callback-url').innerText)">Copiar</button>
+      </p>
+      <form id="form-rdstation" onsubmit="handleRdStationSave(event)">
+        <input type="hidden" id="rdstation-tenant">
+        <div class="form-group">
+          <label>Client ID (opcional se definido em RDSTATION_CLIENT_ID)</label>
+          <input type="text" id="rdstation-client-id" class="form-control" autocomplete="off" placeholder="Client ID do app RD Station">
+        </div>
+        <div class="form-group">
+          <label>Client Secret (opcional se definido em RDSTATION_CLIENT_SECRET)</label>
+          <input type="password" id="rdstation-client-secret" class="form-control" autocomplete="new-password" placeholder="Client Secret do app RD Station">
+        </div>
+        <div class="form-group">
+          <label>Redirect URI customizada (opcional — padrão: /oauth/callback/{tenant})</label>
+          <input type="text" id="rdstation-redirect-uri" class="form-control" autocomplete="off" placeholder="Deixe vazio para usar a URL de callback do tenant acima">
+        </div>
+        <div class="form-group">
+          <label>Refresh Token (opcional — conecte direto sem abrir o OAuth no navegador)</label>
+          <input type="password" id="rdstation-refresh-token" class="form-control" autocomplete="new-password" placeholder="Deixe vazio para autorizar via OAuth 1-Click">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-rdstation')">Cancelar</button>
+          <button type="submit" class="btn btn-rdstation">Salvar &amp; Autorizar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Modal: Setup / Configuração do Agente -->
   <div id="modal-agent-setup" class="modal-overlay">
     <div class="modal-card">
@@ -908,7 +969,7 @@ def get_dashboard_html() -> str:
     }
 
     function clearDashboardView() {
-      ['stat-lovable-connected', 'stat-uscreen-connected', 'stat-meta-connected', 'stat-yungas-connected', 'stat-sults-connected', 'stat-omie-connected', 'stat-total-tenants'].forEach(id => {
+      ['stat-lovable-connected', 'stat-uscreen-connected', 'stat-meta-connected', 'stat-yungas-connected', 'stat-sults-connected', 'stat-omie-connected', 'stat-rdstation-connected', 'stat-total-tenants'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.innerText = '0';
       });
@@ -975,6 +1036,7 @@ def get_dashboard_html() -> str:
       let yungasCount = 0;
       let sultsCount = 0;
       let omieCount = 0;
+      let rdstationCount = 0;
       const tenantKeys = Object.keys(tenants);
 
       tokensStatus.forEach(t => {
@@ -985,6 +1047,7 @@ def get_dashboard_html() -> str:
           if (t.service === 'yungas') yungasCount++;
           if (t.service === 'sults') sultsCount++;
           if (t.service === 'omie') omieCount++;
+          if (t.service === 'rdstation') rdstationCount++;
         }
       });
 
@@ -994,6 +1057,7 @@ def get_dashboard_html() -> str:
       document.getElementById('stat-yungas-connected').innerText = yungasCount;
       document.getElementById('stat-sults-connected').innerText = sultsCount;
       document.getElementById('stat-omie-connected').innerText = omieCount;
+      document.getElementById('stat-rdstation-connected').innerText = rdstationCount;
       document.getElementById('stat-total-tenants').innerText = tenantKeys.length;
 
       const container = document.getElementById('tenants-list');
@@ -1011,6 +1075,7 @@ def get_dashboard_html() -> str:
         const sultsStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'sults') || {};
         const sultsVersions = [sultsStatus.has_v1 ? 'v1' : null, sultsStatus.has_v2 ? 'v2' : null].filter(Boolean);
         const omieStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'omie') || {};
+        const rdStatus = tokensStatus.find(s => s.tenant_id === tId && s.service === 'rdstation') || {};
 
         return `
           <div class="tenant-card">
@@ -1206,10 +1271,90 @@ def get_dashboard_html() -> str:
                   ` : ''}
                 </div>
               </div>
+
+              <!-- RD Station Service -->
+              <div class="service-box service-rdstation">
+                <div class="service-header">
+                  <div class="service-name">
+                    <span style="color: var(--rdstation); font-size: 18px;">🚀</span> RD Station MCP
+                  </div>
+                  <span class="status-pill ${rdStatus.connected ? 'status-connected' : 'status-disconnected'}">
+                    ${rdStatus.connected ? (rdStatus.is_expired ? 'Token Expirado' : 'Conectado') : 'Desconectado'}
+                  </span>
+                </div>
+                <div class="service-details">
+                  ${rdStatus.connected ? `
+                    OAuth ativo (Marketing v2 + CRM v2). Auto-renovação: <strong>${rdStatus.has_refresh_token ? 'Ligada' : 'Sem Refresh'}</strong>.<br>
+                    Expira em: <strong>${formatSeconds(rdStatus.expires_in_seconds)}</strong>${rdStatus.uses_custom_app ? ' · App próprio do tenant' : ' · App global (.env)'}
+                  ` : (rdStatus.has_client_creds ? 'Client ID/Secret configurados. Clique em Conectar RD Station para autorizar via OAuth.' : 'Configure Client ID / Client Secret (no painel ou .env) para conectar a RD Station.')}
+                </div>
+                <div class="service-actions">
+                  ${rdStatus.has_client_creds ? `
+                    <a href="/oauth/login?service=rdstation&tenant=${tId}" class="btn btn-rdstation btn-sm">
+                      ${rdStatus.connected ? '🔄 Reconectar OAuth' : '🚀 Conectar RD Station'}
+                    </a>
+                  ` : ''}
+                  <button class="btn btn-secondary btn-sm" onclick="openRdStationModal('${tId}')">
+                    ⚙️ ${rdStatus.uses_custom_app ? 'Editar App' : 'Configurar App'}
+                  </button>
+                  ${rdStatus.connected ? `
+                    <button class="btn btn-secondary btn-sm" onclick="forceRefreshToken('rdstation', '${tId}')">⚡ Renovar Token</button>
+                    <button class="btn btn-secondary btn-sm" onclick="inspectTools('rdstation', '${tId}')">🛠️ Ver Tools</button>
+                    <button class="btn btn-secondary btn-sm" onclick="showAgentSetup('rdstation', '${tId}', '${tenant.api_key}')">🤖 Setup Agente</button>
+                    <button class="btn btn-danger-outline btn-sm" onclick="disconnectService('rdstation', '${tId}')">Desconectar</button>
+                  ` : ''}
+                </div>
+              </div>
             </div>
           </div>
         `;
       }).join('');
+    }
+
+    function openRdStationModal(tenant) {
+      document.getElementById('form-rdstation').reset();
+      document.getElementById('rdstation-tenant').value = tenant;
+      document.getElementById('rdstation-modal-title').innerText = `Configurar App RD Station (${tenant})`;
+      document.getElementById('rdstation-callback-url').innerText = `${window.location.origin}/oauth/callback/${tenant}`;
+      document.getElementById('modal-rdstation').style.display = 'flex';
+    }
+
+    async function handleRdStationSave(e) {
+      e.preventDefault();
+      const tenant = document.getElementById('rdstation-tenant').value;
+      const client_id = document.getElementById('rdstation-client-id').value.trim();
+      const client_secret = document.getElementById('rdstation-client-secret').value.trim();
+      const redirect_uri = document.getElementById('rdstation-redirect-uri').value.trim();
+      const refresh_token = document.getElementById('rdstation-refresh-token').value.trim();
+      try {
+        const resp = await fetch(`/api/tenants/${tenant}/rdstation/credentials`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            client_id: client_id || null,
+            client_secret: client_secret || null,
+            redirect_uri: redirect_uri || null,
+            refresh_token: refresh_token || null
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          showToast(`❌ Falha ao configurar RD Station: ${escapeHtml(data.detail || JSON.stringify(data))}`, 'error');
+          return;
+        }
+        closeModal('modal-rdstation');
+        if (data.connected) {
+          showToast(`🎉 ${data.message || 'RD Station conectada!'}`);
+          loadTenantsData();
+        } else if (data.oauth_url) {
+          window.location.href = data.oauth_url;
+        } else {
+          showToast(`✅ ${data.message || 'Credenciais salvas!'}`);
+          loadTenantsData();
+        }
+      } catch (err) {
+        showToast(`Erro: ${err.message}`, 'error');
+      }
     }
 
     function openOmieModal(tenant) {

@@ -26,6 +26,8 @@ services:
       - SULTS_TOKEN_V2=${SULTS_TOKEN_V2:-}
       - OMIE_APP_KEY=${OMIE_APP_KEY:-}
       - OMIE_APP_SECRET=${OMIE_APP_SECRET:-}
+      - RDSTATION_CLIENT_ID=${RDSTATION_CLIENT_ID:-}
+      - RDSTATION_CLIENT_SECRET=${RDSTATION_CLIENT_SECRET:-}
     volumes:
       - ./data:/app/data
     healthcheck:

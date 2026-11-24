@@ -118,6 +118,7 @@ class StorageManager:
             self.delete_tokens("yungas", tenant_id)
             self.delete_tokens("sults", tenant_id)
             self.delete_tokens("omie", tenant_id)
+            self.delete_tokens("rdstation", tenant_id)
             return True
         return False
 
@@ -184,7 +185,7 @@ class StorageManager:
         """Lista o status de tokens de todos os pares (serviço, tenant) existentes."""
         records = []
         tenants = self.get_all_tenants()
-        services = ["lovable", "uscreen", "meta", "yungas", "sults", "omie"]
+        services = ["lovable", "uscreen", "meta", "yungas", "sults", "omie", "rdstation"]
 
         for t_id, t_info in tenants.items():
             for s in services:
@@ -232,5 +233,10 @@ class StorageManager:
                 if s == "sults":
                     rec["has_v1"] = has_v1
                     rec["has_v2"] = has_v2
+                if s == "rdstation":
+                    rd_cid = (tokens.get("client_id") if tokens else "") or os.getenv("RDSTATION_CLIENT_ID", "")
+                    rd_csec = (tokens.get("client_secret") if tokens else "") or os.getenv("RDSTATION_CLIENT_SECRET", "")
+                    rec["has_client_creds"] = bool(rd_cid.strip() and rd_csec.strip())
+                    rec["uses_custom_app"] = bool(tokens and tokens.get("client_id") and tokens.get("client_secret"))
                 records.append(rec)
         return records

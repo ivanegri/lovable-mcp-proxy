@@ -41,6 +41,12 @@ from sults_mcp_server import SultsMCPServer
 from sults_client import validate_token as validate_sults_token, SultsError
 from omie_mcp_server import OmieMCPServer
 from omie_client import validate_credentials as validate_omie_credentials, OmieError
+from rdstation_mcp_server import RDStationMCPServer
+from rdstation_client import (
+    resolve_client_credentials as resolve_rdstation_client_credentials,
+    refresh_token as refresh_rdstation_token,
+    RDStationError,
+)
 
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "").rstrip("/")
@@ -53,6 +59,7 @@ meta_mcp_server = MetaAdsMCPServer(storage, meta_db)
 yungas_mcp_server = YungasMCPServer(storage)
 sults_mcp_server = SultsMCPServer(storage)
 omie_mcp_server = OmieMCPServer(storage)
+rdstation_mcp_server = RDStationMCPServer(storage)
 
 mcp_gateway = MCPGateway(
     storage,
@@ -61,6 +68,7 @@ mcp_gateway = MCPGateway(
     yungas_mcp_server=yungas_mcp_server,
     sults_mcp_server=sults_mcp_server,
     omie_mcp_server=omie_mcp_server,
+    rdstation_mcp_server=rdstation_mcp_server,
 )
 
 
@@ -400,6 +408,71 @@ async def save_omie_credentials(tenant_id: str, payload: OmieCredentials, reques
     }
 
 
+class RDStationCredentials(BaseModel):
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    refresh_token: Optional[str] = None
+    redirect_uri: Optional[str] = None
+
+
+@app.post("/api/tenants/{tenant_id}/rdstation/credentials")
+async def save_rdstation_credentials(tenant_id: str, payload: RDStationCredentials, request: Request):
+    """Credenciais RD Station: salva client_id/client_secret do tenant (ou usa .env) e opcionalmente troca refresh_token."""
+    resolve_auth(request, target_service="rdstation", target_tenant=tenant_id)
+    if not storage.get_tenant(tenant_id):
+        storage.create_or_update_tenant(tenant_id, f"Tenant {tenant_id}")
+
+    t_slug = tenant_id.lower()
+    existing = dict(storage.load_tokens("rdstation", t_slug) or {})
+    cid = (payload.client_id or "").strip() or existing.get("client_id", "")
+    csec = (payload.client_secret or "").strip() or existing.get("client_secret", "")
+    ref = (payload.refresh_token or "").strip()
+    custom_redirect = (payload.redirect_uri or "").strip()
+
+    effective_cid = cid or os.getenv("RDSTATION_CLIENT_ID", "").strip()
+    effective_csec = csec or os.getenv("RDSTATION_CLIENT_SECRET", "").strip()
+    if not effective_cid or not effective_csec:
+        raise HTTPException(
+            status_code=400,
+            detail="Informe client_id e client_secret da RD Station (ou defina RDSTATION_CLIENT_ID e RDSTATION_CLIENT_SECRET no .env).",
+        )
+
+    creds = dict(existing)
+    if cid:
+        creds["client_id"] = cid
+    if csec:
+        creds["client_secret"] = csec
+    if custom_redirect:
+        creds["redirect_uri"] = custom_redirect
+    creds["updated_at"] = int(time.time())
+
+    if ref:
+        try:
+            token_data = await refresh_rdstation_token(effective_cid, effective_csec, ref)
+        except RDStationError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Erro ao contatar a RD Station: {e}")
+        creds["access_token"] = token_data["access_token"]
+        creds["refresh_token"] = token_data.get("refresh_token") or ref
+        creds["expires_at"] = int(time.time()) + int(token_data.get("expires_in", 86400))
+        creds["refreshed_at"] = int(time.time())
+        storage.save_tokens("rdstation", t_slug, creds)
+        return {
+            "status": "ok",
+            "connected": True,
+            "message": f"RD Station conectada para '{tenant_id}' via refresh_token!",
+        }
+
+    storage.save_tokens("rdstation", t_slug, creds)
+    return {
+        "status": "ok",
+        "connected": bool(creds.get("access_token")),
+        "oauth_url": f"/oauth/login?service=rdstation&tenant={t_slug}",
+        "message": f"Credenciais RD Station salvas para '{tenant_id}'. Agora conclua a autorização OAuth.",
+    }
+
+
 # ==========================================
 # 3. Fluxo OAuth 2.1 no Navegador (1-Click)
 # ==========================================
@@ -436,10 +509,22 @@ async def oauth_login(
 
     # Determina o redirect_uri baseado no host de acesso da requisição
     base_url = get_request_base_url(request)
-    redirect_uri = f"{base_url}/oauth/callback"
+    if service_clean == "rdstation":
+        saved_rd = storage.load_tokens("rdstation", tenant.lower()) or {}
+        redirect_uri = (saved_rd.get("redirect_uri") or "").strip() or f"{base_url}/oauth/callback/{tenant.lower()}"
+    else:
+        redirect_uri = f"{base_url}/oauth/callback"
 
     try:
-        client_id, client_secret = get_or_register_client(provider, redirect_uri, storage.data_dir)
+        if service_clean == "rdstation":
+            client_id, client_secret = resolve_rdstation_client_credentials(storage, tenant)
+            if not client_id or not client_secret:
+                raise RuntimeError(
+                    "client_id e client_secret da RD Station não configurados. "
+                    "Informe-os no botão 'Configurar App' da RD Station ou defina RDSTATION_CLIENT_ID e RDSTATION_CLIENT_SECRET no .env."
+                )
+        else:
+            client_id, client_secret = get_or_register_client(provider, redirect_uri, storage.data_dir)
     except Exception as e:
         logger.error(f"Erro ao registrar client para {service_clean}: {e}")
         return RedirectResponse(f"/?error={urllib.parse.quote('Erro ao registrar cliente OAuth: ' + str(e))}")
@@ -471,20 +556,49 @@ async def oauth_login(
 
 
 @app.get("/oauth/callback")
+@app.get("/oauth/callback/{tenant_id}")
 async def oauth_callback(
+    request: Request,
+    tenant_id: Optional[str] = None,
     code: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
     error_description: Optional[str] = Query(None)
 ):
-    """Callback chamado pelo provedor OAuth (Lovable / Uscreen) com o código de autorização."""
-    if error or not code or not state:
+    """Callback chamado pelo provedor OAuth (global `/oauth/callback` ou por tenant `/oauth/callback/{tenant_id}`)."""
+    if error or not code:
         err_msg = error_description or error or "Autorização cancelada ou código ausente"
         logger.warning(f"OAuth Callback retornou erro: {err_msg}")
         return RedirectResponse(f"/?error={urllib.parse.quote(err_msg)}")
 
     async with _oauth_lock:
-        pending = _pending_oauth.pop(state, None)
+        clean_expired_oauth_states()
+        pending = _pending_oauth.pop(state, None) if state else None
+        if not pending and tenant_id:
+            t_lower = tenant_id.lower()
+            matching = [k for k, v in _pending_oauth.items() if v.get("tenant", "").lower() == t_lower and v.get("service") == "rdstation"]
+            if matching:
+                pending = _pending_oauth.pop(matching[-1], None)
+        if not pending and not state:
+            rd_states = [k for k, v in _pending_oauth.items() if v.get("service") == "rdstation"]
+            if len(rd_states) == 1:
+                pending = _pending_oauth.pop(rd_states[0], None)
+
+    # Suporte a callback direto por tenant na RD Station mesmo se iniciado fora de /oauth/login
+    if not pending and tenant_id:
+        t_lower = tenant_id.lower()
+        rd_cid, rd_csec = resolve_rdstation_client_credentials(storage, t_lower)
+        if rd_cid and rd_csec:
+            saved_rd = storage.load_tokens("rdstation", t_lower) or {}
+            base_url = get_request_base_url(request)
+            pending = {
+                "service": "rdstation",
+                "tenant": t_lower,
+                "code_verifier": "",
+                "client_id": rd_cid,
+                "client_secret": rd_csec,
+                "redirect_uri": (saved_rd.get("redirect_uri") or "").strip() or f"{base_url}/oauth/callback/{t_lower}",
+            }
 
     if not pending:
         logger.warning("OAuth Callback recebido com state inválido ou expirado.")
@@ -511,6 +625,10 @@ async def oauth_callback(
         # Guarda o client que emitiu o token: o refresh precisa usar exatamente o mesmo
         tokens["client_id"] = pending["client_id"]
         tokens["client_secret"] = pending["client_secret"]
+        if service == "rdstation" and pending.get("redirect_uri"):
+            existing_rd = storage.load_tokens("rdstation", tenant) or {}
+            if existing_rd.get("redirect_uri"):
+                tokens["redirect_uri"] = existing_rd["redirect_uri"]
         storage.save_tokens(service, tenant, tokens)
 
         # Conecta a sessão imediatamente em segundo plano
@@ -550,6 +668,9 @@ async def list_tools_scoped(
     if resolved_service == "omie":
         res = await omie_mcp_server.list_tools(resolved_tenant)
         return {"service": "omie", "tenant": resolved_tenant, "tools": [t.model_dump() for t in res.tools]}
+    if resolved_service == "rdstation":
+        res = await rdstation_mcp_server.list_tools(resolved_tenant)
+        return {"service": "rdstation", "tenant": resolved_tenant, "tools": [t.model_dump() for t in res.tools]}
 
     try:
         response = await session_manager.run_with_session(
@@ -598,6 +719,9 @@ async def call_tool_scoped(
     if resolved_service == "omie":
         res = await omie_mcp_server.call_tool(resolved_tenant, tool_name, arguments)
         return {"service": "omie", "tenant": resolved_tenant, "result": res.model_dump()}
+    if resolved_service == "rdstation":
+        res = await rdstation_mcp_server.call_tool(resolved_tenant, tool_name, arguments)
+        return {"service": "rdstation", "tenant": resolved_tenant, "result": res.model_dump()}
 
     try:
         result = await session_manager.run_with_session(
@@ -647,6 +771,12 @@ async def reconnect_scoped(service: str, tenant: str, request: Request):
             info = await validate_omie_credentials(creds["app_key"], creds["app_secret"])
             emp = f" ({info['empresa']})" if info.get("empresa") else ""
             return {"status": "ok", "message": f"Credenciais Omie ({resolved_tenant}{emp}) validadas!"}
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+    if resolved_service == "rdstation":
+        try:
+            await rdstation_mcp_server.client._ensure_token(resolved_tenant, force=True)
+            return {"status": "ok", "message": f"Token RD Station ({resolved_tenant}) renovado com sucesso!"}
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
 

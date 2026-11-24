@@ -253,3 +253,13 @@ Serviço `omie`, acessível em `/omie/mcp` e `/omie/{tenant}/mcp` (mesma chave f
   - 21 atalhos diretos para as rotinas mais usadas do ERP (Empresas, Clientes, Produtos, Estoque,
     Pedidos de Venda, NF-e, Resumo Financeiro, Contas a Pagar/Receber, Contas Correntes, OS e CRM).
 - **Limite da API:** semáforo global de 4 requisições simultâneas + espaçamento mínimo de 0,25 s (~4 req/s) e backoff exponencial em 429/5xx/faults de concorrência.
+
+## RD Station (Marketing API v2 + CRM API v2)
+
+Serviço `rdstation`, acessível em `/rdstation/mcp` e `/rdstation/{tenant}/mcp` (mesma chave fixa dos demais).
+
+- **Credenciais (modo híbrido):**
+  - **Global via `.env`:** defina `RDSTATION_CLIENT_ID` e `RDSTATION_CLIENT_SECRET` (cadastre `https://SEU_DOMINIO/oauth/callback/{tenant}` como URL de callback no app da RD Station App Store) e clique em *Conectar RD Station* no painel.
+  - **Por tenant no painel:** clique em *Configurar App* no card **RD Station MCP** para informar `client_id`, `client_secret`, opcionalmente uma `redirect_uri` customizada (padrão: `/oauth/callback/{tenant}`) e/ou um `refresh_token` direto.
+- **Rolling Refresh Token:** renovação automática com lock por tenant, salvando sempre o novo `refresh_token` retornado pela RD Station.
+- **Tools (39 no total):** contatos/leads, tags, campos personalizados, eventos CDP/conversões, segmentações, funil, analytics (e-mails, workflows, conversões), webhooks, CRM v2 (deals, organizations, contacts, pipelines, tasks, users) e a tool genérica `rdstation_request`.

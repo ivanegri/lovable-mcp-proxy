@@ -130,6 +130,19 @@ PROVIDERS: Dict[str, OAuthProvider] = {
         token_auth_method="none",
         resource=None,
         default_grant_types=[]
+    ),
+    # RD Station: servidor MCP local (Marketing v2 + CRM v2); OAuth 2.0 com client_id e client_secret
+    "rdstation": OAuthProvider(
+        service_id="rdstation",
+        name="RD Station",
+        mcp_url="local://rdstation",
+        registration_endpoint="",
+        authorization_endpoint=os.getenv("RDSTATION_AUTH_ENDPOINT", "https://api.rd.services/auth/dialog"),
+        token_endpoint=os.getenv("RDSTATION_TOKEN_ENDPOINT", "https://api.rd.services/auth/token"),
+        scopes="",
+        token_auth_method="client_secret_post",
+        resource=None,
+        default_grant_types=["authorization_code", "refresh_token"]
     )
 }
 
@@ -322,6 +335,14 @@ def build_authorization_url(
     state: str
 ) -> str:
     """Constrói a URL de autorização OAuth 2.1 com PKCE para o usuário abrir no navegador."""
+    if provider.service_id == "rdstation":
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "state": state,
+        }
+        return f"{provider.authorization_endpoint}?{urllib.parse.urlencode(params)}"
+
     params = {
         "response_type": "code",
         "client_id": client_id,
@@ -346,6 +367,32 @@ def exchange_code_for_tokens(
     redirect_uri: str
 ) -> Dict[str, Any]:
     """Troca o authorization_code pelo access_token e refresh_token."""
+    if provider.service_id == "rdstation":
+        rd_payload = json.dumps({
+            "client_id": client_id,
+            "client_secret": client_secret or "",
+            "code": code,
+            "grant_type": "authorization_code",
+        }).encode("utf-8")
+        rd_req = urllib.request.Request(
+            provider.token_endpoint,
+            data=rd_payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "MCP-Proxy-Hub",
+            },
+        )
+        try:
+            with urllib.request.urlopen(rd_req, timeout=20) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as he:
+            body = ""
+            try:
+                body = he.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            raise RuntimeError(f"Erro na troca de código no {provider.name} ({he.code}): {body}")
     post_data = {
         "grant_type": "authorization_code",
         "code": code,
